@@ -25,20 +25,32 @@ type Check struct {
 	Description string `json:"description"`
 }
 
-// Snapshot is the latest CI picture for one pull request.
+// Kind identifies whether a snapshot is a pull request or a workflow run.
+type Kind string
+
+const (
+	KindPR  Kind = "pr"
+	KindRun Kind = "run"
+)
+
+// Snapshot is the latest CI picture for one pull request or Actions run.
 type Snapshot struct {
-	Input       string
-	Number      int
-	Title       string
-	URL         string
-	State       string
-	IsDraft     bool
-	HeadRefName string
-	Author      string
-	Repo        string
-	Checks      []Check
-	Err         error
-	FetchedAt   time.Time
+	Kind         Kind
+	Input        string
+	Number       int
+	RunID        int64
+	Title        string
+	URL          string
+	State        string
+	IsDraft      bool
+	HeadRefName  string
+	Author       string
+	Repo         string
+	WorkflowName string
+	Event        string
+	Checks       []Check
+	Err          error
+	FetchedAt    time.Time
 }
 
 // Summary counts checks by gh bucket.
@@ -62,7 +74,10 @@ type prView struct {
 	} `json:"author"`
 }
 
-var prURLRe = regexp.MustCompile(`(?i)(?:github\.com[:/])([^/]+)/([^/]+)/pull/(\d+)`)
+var (
+	prURLRe  = regexp.MustCompile(`(?i)(?:github\.com[:/])([^/]+)/([^/]+)/pull/(\d+)`)
+	runURLRe = regexp.MustCompile(`(?i)(?:github\.com[:/])([^/]+)/([^/]+)/actions/runs/(\d+)`)
+)
 
 // ParseRefs splits CLI args, commas, and whitespace into PR refs (URLs or numbers).
 func ParseRefs(args []string) []string {
@@ -86,13 +101,15 @@ func ParseRefs(args []string) []string {
 	return refs
 }
 
-// RepoFromRef extracts owner/repo from a GitHub pull request URL.
+// RepoFromRef extracts owner/repo from a GitHub pull request or Actions run URL.
 func RepoFromRef(ref string) string {
-	m := prURLRe.FindStringSubmatch(ref)
-	if len(m) != 4 {
-		return ""
+	if m := prURLRe.FindStringSubmatch(ref); len(m) == 4 {
+		return m[1] + "/" + m[2]
 	}
-	return m[1] + "/" + m[2]
+	if m := runURLRe.FindStringSubmatch(ref); len(m) == 4 {
+		return m[1] + "/" + m[2]
+	}
+	return ""
 }
 
 // NumberFromRef extracts the pull request number from a GitHub URL.
@@ -105,7 +122,22 @@ func NumberFromRef(ref string) int {
 	return n
 }
 
-// Identity is the canonical repo + number for a snapshot, when known.
+// RunIDFromRef extracts the workflow run ID from an Actions URL.
+func RunIDFromRef(ref string) int64 {
+	m := runURLRe.FindStringSubmatch(ref)
+	if len(m) != 4 {
+		return 0
+	}
+	n, _ := strconv.ParseInt(m[3], 10, 64)
+	return n
+}
+
+// IsRunRef reports whether ref points at a GitHub Actions workflow run.
+func IsRunRef(ref string) bool {
+	return RunIDFromRef(ref) > 0
+}
+
+// Identity is the canonical repo + number for a pull request snapshot, when known.
 func Identity(s Snapshot) (repo string, number int) {
 	number = s.Number
 	if number == 0 {
@@ -137,9 +169,33 @@ func SamePR(a, b Snapshot) bool {
 	return a.Input != "" && a.Input == b.Input
 }
 
-// Fetch loads PR metadata and checks via gh.
+// Same reports whether two snapshots refer to the same PR or Actions run.
+func Same(a, b Snapshot) bool {
+	if a.RunID > 0 && a.RunID == b.RunID {
+		return true
+	}
+	if IsRunRef(a.Input) && a.Input == b.Input {
+		return true
+	}
+	if a.Kind == KindRun || b.Kind == KindRun {
+		if a.URL != "" && b.URL != "" && strings.TrimRight(a.URL, "/") == strings.TrimRight(b.URL, "/") {
+			return true
+		}
+		return false
+	}
+	return SamePR(a, b)
+}
+
+// Fetch loads PR or Actions run status via gh.
 func Fetch(ctx context.Context, ref string, required bool) Snapshot {
-	snap := Snapshot{Input: ref, FetchedAt: time.Now()}
+	if IsRunRef(ref) {
+		return FetchRun(ctx, ref)
+	}
+	return fetchPR(ctx, ref, required)
+}
+
+func fetchPR(ctx context.Context, ref string, required bool) Snapshot {
+	snap := Snapshot{Kind: KindPR, Input: ref, FetchedAt: time.Now()}
 	if repo := RepoFromRef(ref); repo != "" {
 		snap.Repo = repo
 	}
@@ -171,13 +227,19 @@ func Fetch(ctx context.Context, ref string, required bool) Snapshot {
 	return loadChecks(ctx, snap, required)
 }
 
-// Refresh reloads checks for an already-fetched PR. Metadata is refetched if
-// the previous call failed.
+// Refresh reloads status for an already-fetched PR or Actions run.
 func Refresh(ctx context.Context, prev Snapshot, required bool) Snapshot {
+	if prev.Kind == KindRun || prev.RunID > 0 || IsRunRef(prev.Input) {
+		if prev.RunID > 0 && prev.Repo != "" {
+			return loadRun(ctx, prev)
+		}
+		return FetchRun(ctx, prev.Input)
+	}
 	if prev.URL == "" || prev.Number == 0 {
 		return Fetch(ctx, prev.Input, required)
 	}
 	next := prev
+	next.Kind = KindPR
 	next.Err = nil
 	next.FetchedAt = time.Now()
 	return loadChecks(ctx, next, required)

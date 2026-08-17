@@ -36,6 +36,40 @@ func TestRepoFromRef(t *testing.T) {
 	if n := NumberFromRef("https://github.com/cli/cli/pull/9079/files"); n != 9079 {
 		t.Fatalf("number=%d", n)
 	}
+	run := "https://github.com/abit2/chores/actions/runs/32031873044"
+	if RepoFromRef(run) != "abit2/chores" {
+		t.Fatalf("run repo=%q", RepoFromRef(run))
+	}
+	if id := RunIDFromRef(run); id != 32031873044 {
+		t.Fatalf("run id=%d", id)
+	}
+	if !IsRunRef(run) {
+		t.Fatal("expected run ref")
+	}
+}
+
+func TestSameRun(t *testing.T) {
+	a := Snapshot{Kind: KindRun, RunID: 32031873044, Repo: "abit2/chores", URL: "https://github.com/abit2/chores/actions/runs/32031873044"}
+	b := Snapshot{Kind: KindRun, Input: "https://github.com/abit2/chores/actions/runs/32031873044", RunID: 32031873044}
+	if !Same(a, b) {
+		t.Fatal("expected same run")
+	}
+	pr := Snapshot{Kind: KindPR, Repo: "abit2/chores", Number: 1}
+	if Same(a, pr) {
+		t.Fatal("run should not match PR")
+	}
+}
+
+func TestJobBucket(t *testing.T) {
+	if jobBucket("in_progress", "") != "pending" {
+		t.Fatal("in progress")
+	}
+	if jobBucket("completed", "success") != "pass" {
+		t.Fatal("success")
+	}
+	if jobBucket("completed", "failure") != "fail" {
+		t.Fatal("failure")
+	}
 }
 
 func TestSamePR(t *testing.T) {
@@ -107,5 +141,29 @@ func TestFetchPublicPR(t *testing.T) {
 	}
 	if s.Title == "" {
 		t.Fatal("empty title")
+	}
+}
+
+func TestFetchRun(t *testing.T) {
+	if os.Getenv("LIVE_GH") == "" {
+		t.Skip("set LIVE_GH=1 to hit GitHub")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	s := FetchRun(ctx, "https://github.com/abit2/chores/actions/runs/32031873044")
+	if s.Err != nil {
+		t.Fatal(s.Err)
+	}
+	if s.Kind != KindRun {
+		t.Fatalf("kind=%s", s.Kind)
+	}
+	if s.RunID != 32031873044 {
+		t.Fatalf("run id=%d", s.RunID)
+	}
+	if s.WorkflowName == "" {
+		t.Fatal("empty workflow")
+	}
+	if !Summarize(s.Checks).Finished() {
+		t.Fatalf("expected finished, checks=%+v", s.Checks)
 	}
 }

@@ -8,9 +8,9 @@ import (
 	"os/exec"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/abit2/chores/internal/ghpr"
 	"github.com/abit2/chores/internal/ui"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 var version = "dev"
@@ -19,18 +19,22 @@ func main() {
 	var interval time.Duration
 	flag.DurationVar(&interval, "interval", 10*time.Second, "how often to poll CI")
 	flag.DurationVar(&interval, "i", 10*time.Second, "how often to poll CI")
+	repo := flag.String("repo", "", "watch GitHub Actions runs for OWNER/REPO")
+	flag.StringVar(repo, "R", "", "watch GitHub Actions runs for OWNER/REPO")
 	required := flag.Bool("required", false, "only watch required checks")
 	noSound := flag.Bool("no-sound", false, "notify without playing a sound")
 	exitDone := flag.Bool("exit-when-done", false, "quit once every PR's CI has finished")
 	printVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Watch GitHub PR CI with gh and ping you when it finishes.
+		fmt.Fprintf(os.Stderr, `Watch GitHub PR CI and Actions runs with gh, and ping you when they finish.
 
 Usage:
-  chores [flags] <pr-url> [<pr-url> ...]
+  chores [flags] <pr-or-run-url> [<url> ...]
 
-URLs can be space- or comma-separated. If none are given, the TUI
-lets you paste them. You can also pipe URLs on stdin.
+URLs can be pull requests or Actions run links, space- or comma-separated.
+If none are given, the TUI lets you paste them. You can also pipe URLs on stdin.
+
+  chores --repo owner/repo     watch recent Actions runs for a repository
 
 Flags:
 `)
@@ -75,6 +79,7 @@ Flags:
 	p := tea.NewProgram(
 		ui.New(ui.Config{
 			Refs:     refs,
+			Repo:     *repo,
 			Interval: interval,
 			Required: *required,
 			NoSound:  *noSound,
