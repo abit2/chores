@@ -4,31 +4,33 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/abit2/chores/internal/ghpr"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type palette struct {
-	accent  lipgloss.Color
-	muted   lipgloss.Color
-	pass    lipgloss.Color
-	fail    lipgloss.Color
-	pending lipgloss.Color
-	skip    lipgloss.Color
-	text    lipgloss.Color
-	border  lipgloss.Color
+	accent     lipgloss.Color
+	muted      lipgloss.Color
+	pass       lipgloss.Color
+	fail       lipgloss.Color
+	pending    lipgloss.Color
+	skip       lipgloss.Color
+	text       lipgloss.Color
+	border     lipgloss.Color
+	selectedBg lipgloss.Color
 }
 
 func colors() palette {
 	return palette{
-		accent:  lipgloss.Color("#FF75B5"),
-		muted:   lipgloss.Color("#6C7086"),
-		pass:    lipgloss.Color("#A6E3A1"),
-		fail:    lipgloss.Color("#F38BA8"),
-		pending: lipgloss.Color("#F9E2AF"),
-		skip:    lipgloss.Color("#7F849C"),
-		text:    lipgloss.Color("#CDD6F4"),
-		border:  lipgloss.Color("#45475A"),
+		accent:     lipgloss.Color("#FF75B5"),
+		muted:      lipgloss.Color("#6C7086"),
+		pass:       lipgloss.Color("#A6E3A1"),
+		fail:       lipgloss.Color("#F38BA8"),
+		pending:    lipgloss.Color("#F9E2AF"),
+		skip:       lipgloss.Color("#7F849C"),
+		text:       lipgloss.Color("#CDD6F4"),
+		border:     lipgloss.Color("#45475A"),
+		selectedBg: lipgloss.Color("#313244"),
 	}
 }
 

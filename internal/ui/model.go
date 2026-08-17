@@ -8,13 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/abit2/chores/internal/ghpr"
+	"github.com/abit2/chores/internal/notify"
+	"github.com/abit2/chores/internal/store"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/abit2/chores/internal/ghpr"
-	"github.com/abit2/chores/internal/notify"
 )
 
 const fetchTimeout = 30 * time.Second
@@ -22,6 +23,8 @@ const fetchTimeout = 30 * time.Second
 // Config is the watcher settings from the CLI.
 type Config struct {
 	Refs     []string
+	Repo     string
+	Hidden   []string
 	Interval time.Duration
 	Required bool
 	NoSound  bool
@@ -40,6 +43,7 @@ type prRow struct {
 	snap     ghpr.Snapshot
 	notified bool
 	expanded bool
+	pinned   bool
 }
 
 type model struct {
@@ -52,6 +56,7 @@ type model struct {
 
 	rows     []prRow
 	selected int
+	hidden   []string
 	polling  bool
 	pollSeq  int
 	lastPoll time.Time
@@ -61,8 +66,10 @@ type model struct {
 }
 
 type pollMsg struct {
-	seq   int
-	snaps []ghpr.Snapshot
+	seq         int
+	snaps       []ghpr.Snapshot
+	discovered  []ghpr.Snapshot
+	discoverErr error
 }
 
 type tickMsg time.Time
@@ -78,7 +85,7 @@ func New(cfg Config) tea.Model {
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF75B5"))
 
 	ta := textarea.New()
-	ta.Placeholder = "https://github.com/org/repo/pull/123"
+	ta.Placeholder = "https://github.com/org/repo/pull/123  or  /actions/runs/456"
 	ta.SetWidth(72)
 	ta.SetHeight(6)
 	ta.ShowLineNumbers = false
@@ -87,16 +94,18 @@ func New(cfg Config) tea.Model {
 
 	m := model{
 		cfg:     cfg,
+		hidden:  append([]string(nil), cfg.Hidden...),
 		spinner: sp,
 		input:   ta,
 		width:   80,
 		height:  24,
 	}
-	if len(cfg.Refs) > 0 {
+	if len(cfg.Refs) > 0 || cfg.Repo != "" {
 		m.mode = modeWatch
 		m.rows = rowsFromRefs(cfg.Refs)
 		m.polling = true
 		m.pollSeq = 1
+		_ = m.persist()
 	} else {
 		m.mode = modeInput
 	}
@@ -107,11 +116,24 @@ func rowsFromRefs(refs []string) []prRow {
 	rows := make([]prRow, len(refs))
 	for i, ref := range refs {
 		rows[i] = prRow{
-			snap:     ghpr.Snapshot{Input: ref, Repo: ghpr.RepoFromRef(ref)},
+			snap:     seedSnap(ref),
 			expanded: true,
+			pinned:   true,
 		}
 	}
 	return rows
+}
+
+func seedSnap(ref string) ghpr.Snapshot {
+	if ghpr.IsRunRef(ref) {
+		return ghpr.Snapshot{
+			Kind:  ghpr.KindRun,
+			Input: ref,
+			Repo:  ghpr.RepoFromRef(ref),
+			RunID: ghpr.RunIDFromRef(ref),
+		}
+	}
+	return ghpr.Snapshot{Kind: ghpr.KindPR, Input: ref, Repo: ghpr.RepoFromRef(ref)}
 }
 
 func (m model) Init() tea.Cmd {
@@ -224,6 +246,9 @@ func (m model) submitInput(startTicker bool) (tea.Model, tea.Cmd) {
 		m.selected = 0
 	}
 	m.layout()
+	if err := m.persist(); err != nil {
+		m.status = err.Error()
+	}
 	cmds := []tea.Cmd{m.startPoll(), tea.SetWindowTitle(m.watchingTitle())}
 	if startTicker {
 		cmds = append(cmds, m.spinner.Tick, tick(m.cfg.Interval))
@@ -239,9 +264,11 @@ func (m *model) appendRefs(refs []string) (added, skipped int) {
 			continue
 		}
 		m.rows = append(m.rows, prRow{
-			snap:     ghpr.Snapshot{Input: ref, Repo: ghpr.RepoFromRef(ref)},
+			snap:     seedSnap(ref),
 			expanded: true,
+			pinned:   true,
 		})
+		m.unhide(ref)
 		m.cfg.Refs = append(m.cfg.Refs, ref)
 		if firstNew < 0 {
 			firstNew = len(m.rows) - 1
@@ -255,14 +282,9 @@ func (m *model) appendRefs(refs []string) (added, skipped int) {
 }
 
 func (m model) hasRef(ref string) bool {
-	probe := ghpr.Snapshot{
-		Input:  ref,
-		URL:    ref,
-		Repo:   ghpr.RepoFromRef(ref),
-		Number: ghpr.NumberFromRef(ref),
-	}
+	probe := seedSnap(ref)
 	for _, row := range m.rows {
-		if ghpr.SamePR(row.snap, probe) {
+		if ghpr.Same(row.snap, probe) {
 			return true
 		}
 	}
@@ -275,16 +297,12 @@ func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "j", "down":
 		m.status = ""
-		if m.selected < len(m.rows)-1 {
-			m.selected++
-		}
+		m.moveSelection(1)
 		m.viewport.SetContent(m.body())
 		return m, nil
 	case "k", "up":
 		m.status = ""
-		if m.selected > 0 {
-			m.selected--
-		}
+		m.moveSelection(-1)
 		m.viewport.SetContent(m.body())
 		return m, nil
 	case "enter", " ":
@@ -292,6 +310,14 @@ func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rows[m.selected].expanded = !m.rows[m.selected].expanded
 			m.viewport.SetContent(m.body())
 		}
+		return m, nil
+	case "d", "x", "delete", "backspace":
+		m.removeSelected()
+		m.viewport.SetContent(m.body())
+		return m, nil
+	case "C":
+		m.clearSaved()
+		m.viewport.SetContent(m.body())
 		return m, nil
 	case "r":
 		if m.polling {
@@ -303,7 +329,7 @@ func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = ""
 		m.input.Reset()
 		m.input.SetHeight(3)
-		m.input.Placeholder = "https://github.com/org/repo/pull/123"
+		m.input.Placeholder = "https://github.com/org/repo/pull/123  or  /actions/runs/456"
 		m.input.Focus()
 		m.layout()
 		return m, textarea.Blink
@@ -311,13 +337,167 @@ func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.rows) == 0 {
 			return m, nil
 		}
-		ref := m.rows[m.selected].snap.URL
-		if ref == "" {
-			ref = m.rows[m.selected].snap.Input
-		}
-		return m, openPR(ref)
+		return m, openItem(m.rows[m.selected].snap)
 	}
 	return m, nil
+}
+
+func (m *model) moveSelection(delta int) {
+	order := m.displayOrder()
+	if len(order) == 0 {
+		return
+	}
+	pos := 0
+	for i, idx := range order {
+		if idx == m.selected {
+			pos = i
+			break
+		}
+	}
+	pos += delta
+	if pos < 0 {
+		pos = 0
+	}
+	if pos >= len(order) {
+		pos = len(order) - 1
+	}
+	m.selected = order[pos]
+}
+
+func (m model) displayOrder() []int {
+	prs := make([]int, 0, len(m.rows))
+	runs := make([]int, 0, len(m.rows))
+	for i, row := range m.rows {
+		if row.snap.Kind == ghpr.KindRun {
+			runs = append(runs, i)
+		} else {
+			prs = append(prs, i)
+		}
+	}
+	return append(prs, runs...)
+}
+
+func (m *model) removeSelected() {
+	if len(m.rows) == 0 {
+		return
+	}
+	i := m.selected
+	if i < 0 || i >= len(m.rows) {
+		return
+	}
+	row := m.rows[i]
+	url := persistURL(row.snap)
+	label := url
+	if row.snap.Kind == ghpr.KindRun && row.snap.WorkflowName != "" {
+		label = row.snap.WorkflowName
+	} else if row.snap.Number > 0 {
+		label = fmt.Sprintf("#%d", row.snap.Number)
+	}
+	if row.pinned {
+		m.cfg.Refs = dropMatching(m.cfg.Refs, row.snap)
+	} else if url != "" {
+		m.hidden = store.MergeURLs(m.hidden, []string{url})
+	}
+	m.rows = append(m.rows[:i], m.rows[i+1:]...)
+	if m.selected >= len(m.rows) {
+		m.selected = max(0, len(m.rows)-1)
+	}
+	m.status = "removed " + label
+	if err := m.persist(); err != nil {
+		m.status = err.Error()
+	}
+}
+
+func (m *model) clearSaved() {
+	n := 0
+	for _, row := range m.rows {
+		if row.pinned {
+			n++
+		}
+	}
+	if n == 0 && len(m.hidden) == 0 && len(m.rows) == 0 {
+		m.status = "nothing to clear"
+		return
+	}
+	m.rows = nil
+	m.cfg.Refs = nil
+	m.hidden = nil
+	m.selected = 0
+	if err := m.persist(); err != nil {
+		m.status = err.Error()
+		return
+	}
+	switch {
+	case n == 0:
+		m.status = "cleared watch list"
+	case n == 1:
+		m.status = "cleared 1 saved URL"
+	default:
+		m.status = fmt.Sprintf("cleared %d saved URLs", n)
+	}
+}
+
+func persistURL(snap ghpr.Snapshot) string {
+	if snap.URL != "" {
+		return snap.URL
+	}
+	return snap.Input
+}
+
+func (m *model) persist() error {
+	urls := make([]string, 0, len(m.rows))
+	for _, row := range m.rows {
+		if !row.pinned {
+			continue
+		}
+		if u := persistURL(row.snap); u != "" {
+			urls = append(urls, u)
+		}
+	}
+	return store.Save(store.Watch{
+		URLs:   urls,
+		Repo:   m.cfg.Repo,
+		Hidden: m.hidden,
+	})
+}
+
+func (m *model) unhide(ref string) {
+	probe := seedSnap(ref)
+	kept := m.hidden[:0]
+	if kept == nil {
+		kept = []string{}
+	}
+	for _, h := range m.hidden {
+		if ghpr.Same(seedSnap(h), probe) {
+			continue
+		}
+		kept = append(kept, h)
+	}
+	m.hidden = kept
+}
+
+func (m model) isHidden(snap ghpr.Snapshot) bool {
+	return hiddenHas(m.hidden, snap)
+}
+
+func hiddenHas(hidden []string, snap ghpr.Snapshot) bool {
+	for _, h := range hidden {
+		if ghpr.Same(seedSnap(h), snap) {
+			return true
+		}
+	}
+	return false
+}
+
+func dropMatching(refs []string, snap ghpr.Snapshot) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ghpr.Same(seedSnap(ref), snap) {
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out
 }
 
 func (m model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
@@ -325,9 +505,18 @@ func (m model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 	if latest {
 		m.polling = false
 		m.lastPoll = time.Now()
+		if msg.discoverErr != nil {
+			m.status = msg.discoverErr.Error()
+		}
 	}
 
 	var cmds []tea.Cmd
+	for _, snap := range msg.discovered {
+		if m.indexOf(snap) >= 0 || m.isHidden(snap) {
+			continue
+		}
+		m.rows = append(m.rows, prRow{snap: snap, expanded: true})
+	}
 	for _, snap := range msg.snaps {
 		i := m.indexOf(snap)
 		if i < 0 {
@@ -350,6 +539,11 @@ func (m model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 	if m.ready {
 		m.viewport.SetContent(m.body())
 	}
+	if latest {
+		if err := m.persist(); err != nil && m.status == "" {
+			m.status = err.Error()
+		}
+	}
 	cmds = append(cmds, tea.SetWindowTitle(m.watchingTitle()))
 
 	if latest && m.cfg.ExitDone && len(m.rows) > 0 {
@@ -369,7 +563,7 @@ func (m model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 
 func (m model) indexOf(snap ghpr.Snapshot) int {
 	for i, row := range m.rows {
-		if ghpr.SamePR(row.snap, snap) {
+		if ghpr.Same(row.snap, snap) {
 			return i
 		}
 	}
@@ -386,32 +580,76 @@ func (m model) poll() tea.Cmd {
 	seq := m.pollSeq
 	rows := append([]prRow(nil), m.rows...)
 	required := m.cfg.Required
+	watchRepo := m.cfg.Repo
+	hidden := append([]string(nil), m.hidden...)
 	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+		defer cancel()
+
+		var discovered []ghpr.Snapshot
+		var discoverErr error
+		if watchRepo != "" {
+			listed, err := ghpr.ListRuns(ctx, watchRepo, 15)
+			if err != nil {
+				discoverErr = err
+			} else {
+				known := make([]ghpr.Snapshot, 0, len(rows))
+				for _, row := range rows {
+					known = append(known, row.snap)
+				}
+				for _, snap := range listed {
+					if indexOfSnaps(known, snap) >= 0 || hiddenHas(hidden, snap) {
+						continue
+					}
+					if !ghpr.Summarize(snap.Checks).Finished() {
+						detailed := ghpr.Refresh(ctx, snap, required)
+						if detailed.Err == nil {
+							snap = detailed
+						}
+					}
+					discovered = append(discovered, snap)
+					known = append(known, snap)
+				}
+			}
+		}
+
 		snaps := make([]ghpr.Snapshot, len(rows))
 		var wg sync.WaitGroup
 		for i, row := range rows {
 			wg.Add(1)
 			go func(i int, row prRow) {
 				defer wg.Done()
-				ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
-				defer cancel()
-				if row.snap.URL == "" || row.snap.Number == 0 {
-					snaps[i] = ghpr.Fetch(ctx, row.snap.Input, required)
-					return
-				}
-				snaps[i] = ghpr.Refresh(ctx, row.snap, required)
+				itemCtx, itemCancel := context.WithTimeout(context.Background(), fetchTimeout)
+				defer itemCancel()
+				snaps[i] = ghpr.Refresh(itemCtx, row.snap, required)
 			}(i, row)
 		}
 		wg.Wait()
-		return pollMsg{seq: seq, snaps: snaps}
+		return pollMsg{seq: seq, snaps: snaps, discovered: discovered, discoverErr: discoverErr}
 	}
+}
+
+func indexOfSnaps(snaps []ghpr.Snapshot, snap ghpr.Snapshot) int {
+	for i, s := range snaps {
+		if ghpr.Same(s, snap) {
+			return i
+		}
+	}
+	return -1
 }
 
 func pingCmd(index int, snap ghpr.Snapshot, sound bool) tea.Cmd {
 	return func() tea.Msg {
 		sum := ghpr.Summarize(snap.Checks)
 		title := fmt.Sprintf("CI %s", sum.Outcome())
-		if snap.Number > 0 {
+		switch {
+		case snap.Kind == ghpr.KindRun:
+			name := snap.WorkflowName
+			if name == "" {
+				name = "Actions"
+			}
+			title = fmt.Sprintf("Actions %s · %s", sum.Outcome(), name)
+		case snap.Number > 0:
 			title = fmt.Sprintf("CI %s · PR #%d", sum.Outcome(), snap.Number)
 		}
 		body := snap.Title
@@ -426,9 +664,22 @@ func pingCmd(index int, snap ghpr.Snapshot, sound bool) tea.Cmd {
 	}
 }
 
-func openPR(ref string) tea.Cmd {
+func openItem(snap ghpr.Snapshot) tea.Cmd {
 	return func() tea.Msg {
-		_ = exec.Command("gh", "pr", "view", ref, "--web").Start()
+		switch {
+		case snap.Kind == ghpr.KindRun && snap.RunID > 0:
+			args := []string{"run", "view", fmt.Sprintf("%d", snap.RunID), "--web"}
+			if snap.Repo != "" {
+				args = append(args, "--repo", snap.Repo)
+			}
+			_ = exec.Command("gh", args...).Start()
+		default:
+			ref := snap.URL
+			if ref == "" {
+				ref = snap.Input
+			}
+			_ = exec.Command("gh", "pr", "view", ref, "--web").Start()
+		}
 		return nil
 	}
 }
@@ -443,7 +694,16 @@ func ExitSummary(tm tea.Model) string {
 	for _, row := range m.rows {
 		snap := row.snap
 		label := snap.Input
-		if snap.Number > 0 {
+		switch {
+		case snap.Kind == ghpr.KindRun:
+			label = snap.WorkflowName
+			if label == "" {
+				label = "actions"
+			}
+			if snap.Repo != "" {
+				label = snap.Repo + " " + label
+			}
+		case snap.Number > 0:
 			label = fmt.Sprintf("#%d", snap.Number)
 			if snap.Repo != "" {
 				label = snap.Repo + " " + label
@@ -501,10 +761,27 @@ func (m model) headerLine() string {
 		left = "  " + left
 	}
 
-	bits := []string{
-		fmt.Sprintf("%d PR%s", len(m.rows), plural(len(m.rows))),
-		fmt.Sprintf("every %s", m.cfg.Interval),
+	prs, runs := 0, 0
+	for _, row := range m.rows {
+		if row.snap.Kind == ghpr.KindRun {
+			runs++
+		} else {
+			prs++
+		}
 	}
+	var bits []string
+	switch {
+	case prs > 0 && runs > 0:
+		bits = append(bits, fmt.Sprintf("%d PR%s · %d action%s", prs, plural(prs), runs, plural(runs)))
+	case runs > 0:
+		bits = append(bits, fmt.Sprintf("%d action%s", runs, plural(runs)))
+	default:
+		bits = append(bits, fmt.Sprintf("%d PR%s", prs, plural(prs)))
+	}
+	if m.cfg.Repo != "" {
+		bits = append(bits, m.cfg.Repo)
+	}
+	bits = append(bits, fmt.Sprintf("every %s", m.cfg.Interval))
 	if m.cfg.Required {
 		bits = append(bits, "required only")
 	}
@@ -544,7 +821,7 @@ func (m *model) layout() {
 }
 
 func addStatus(added, skipped int) string {
-	s := fmt.Sprintf("added %d PR%s", added, plural(added))
+	s := fmt.Sprintf("added %d item%s", added, plural(added))
 	if skipped > 0 {
 		s += fmt.Sprintf(" · skipped %d duplicate%s", skipped, plural(skipped))
 	}
