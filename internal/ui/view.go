@@ -46,7 +46,7 @@ func (m model) viewWatch() string {
 	if m.mode == modeAdd {
 		parts = append(parts, "", m.viewAddPanel())
 	} else {
-		parts = append(parts, help.Render("a add  ·  d remove  ·  j/k select  ·  enter checks  ·  o browser  ·  r refresh  ·  q quit"))
+		parts = append(parts, help.Render("a add  ·  d remove  ·  C clear  ·  j/k select  ·  enter checks  ·  o browser  ·  r refresh  ·  q quit"))
 	}
 	return strings.Join(parts, "\n")
 }

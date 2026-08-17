@@ -315,6 +315,10 @@ func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.removeSelected()
 		m.viewport.SetContent(m.body())
 		return m, nil
+	case "C":
+		m.clearSaved()
+		m.viewport.SetContent(m.body())
+		return m, nil
 	case "r":
 		if m.polling {
 			return m, nil
@@ -401,6 +405,35 @@ func (m *model) removeSelected() {
 	m.status = "removed " + label
 	if err := m.persist(); err != nil {
 		m.status = err.Error()
+	}
+}
+
+func (m *model) clearSaved() {
+	n := 0
+	for _, row := range m.rows {
+		if row.pinned {
+			n++
+		}
+	}
+	if n == 0 && len(m.hidden) == 0 && len(m.rows) == 0 {
+		m.status = "nothing to clear"
+		return
+	}
+	m.rows = nil
+	m.cfg.Refs = nil
+	m.hidden = nil
+	m.selected = 0
+	if err := m.persist(); err != nil {
+		m.status = err.Error()
+		return
+	}
+	switch {
+	case n == 0:
+		m.status = "cleared watch list"
+	case n == 1:
+		m.status = "cleared 1 saved URL"
+	default:
+		m.status = fmt.Sprintf("cleared %d saved URLs", n)
 	}
 }
 
