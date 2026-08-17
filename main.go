@@ -13,6 +13,8 @@ import (
 	"github.com/personal/chores/internal/ui"
 )
 
+var version = "dev"
+
 func main() {
 	var interval time.Duration
 	flag.DurationVar(&interval, "interval", 10*time.Second, "how often to poll CI")
@@ -20,6 +22,7 @@ func main() {
 	required := flag.Bool("required", false, "only watch required checks")
 	noSound := flag.Bool("no-sound", false, "notify without playing a sound")
 	exitDone := flag.Bool("exit-when-done", false, "quit once every PR's CI has finished")
+	printVersion := flag.Bool("version", false, "print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Watch GitHub PR CI with gh and ping you when it finishes.
 
@@ -34,6 +37,11 @@ Flags:
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if *printVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	if _, err := exec.LookPath("gh"); err != nil {
 		fmt.Fprintln(os.Stderr, "gh is required in PATH (https://cli.github.com)")
