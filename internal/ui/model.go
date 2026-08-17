@@ -10,6 +10,7 @@ import (
 
 	"github.com/abit2/chores/internal/ghpr"
 	"github.com/abit2/chores/internal/notify"
+	"github.com/abit2/chores/internal/store"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -23,6 +24,7 @@ const fetchTimeout = 30 * time.Second
 type Config struct {
 	Refs     []string
 	Repo     string
+	Hidden   []string
 	Interval time.Duration
 	Required bool
 	NoSound  bool
@@ -41,6 +43,7 @@ type prRow struct {
 	snap     ghpr.Snapshot
 	notified bool
 	expanded bool
+	pinned   bool
 }
 
 type model struct {
@@ -53,6 +56,7 @@ type model struct {
 
 	rows     []prRow
 	selected int
+	hidden   []string
 	polling  bool
 	pollSeq  int
 	lastPoll time.Time
@@ -90,6 +94,7 @@ func New(cfg Config) tea.Model {
 
 	m := model{
 		cfg:     cfg,
+		hidden:  append([]string(nil), cfg.Hidden...),
 		spinner: sp,
 		input:   ta,
 		width:   80,
@@ -100,6 +105,7 @@ func New(cfg Config) tea.Model {
 		m.rows = rowsFromRefs(cfg.Refs)
 		m.polling = true
 		m.pollSeq = 1
+		_ = m.persist()
 	} else {
 		m.mode = modeInput
 	}
@@ -112,6 +118,7 @@ func rowsFromRefs(refs []string) []prRow {
 		rows[i] = prRow{
 			snap:     seedSnap(ref),
 			expanded: true,
+			pinned:   true,
 		}
 	}
 	return rows
@@ -239,6 +246,9 @@ func (m model) submitInput(startTicker bool) (tea.Model, tea.Cmd) {
 		m.selected = 0
 	}
 	m.layout()
+	if err := m.persist(); err != nil {
+		m.status = err.Error()
+	}
 	cmds := []tea.Cmd{m.startPoll(), tea.SetWindowTitle(m.watchingTitle())}
 	if startTicker {
 		cmds = append(cmds, m.spinner.Tick, tick(m.cfg.Interval))
@@ -256,7 +266,9 @@ func (m *model) appendRefs(refs []string) (added, skipped int) {
 		m.rows = append(m.rows, prRow{
 			snap:     seedSnap(ref),
 			expanded: true,
+			pinned:   true,
 		})
+		m.unhide(ref)
 		m.cfg.Refs = append(m.cfg.Refs, ref)
 		if firstNew < 0 {
 			firstNew = len(m.rows) - 1
@@ -298,6 +310,10 @@ func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rows[m.selected].expanded = !m.rows[m.selected].expanded
 			m.viewport.SetContent(m.body())
 		}
+		return m, nil
+	case "d", "x", "delete", "backspace":
+		m.removeSelected()
+		m.viewport.SetContent(m.body())
 		return m, nil
 	case "r":
 		if m.polling {
@@ -357,6 +373,100 @@ func (m model) displayOrder() []int {
 	return append(prs, runs...)
 }
 
+func (m *model) removeSelected() {
+	if len(m.rows) == 0 {
+		return
+	}
+	i := m.selected
+	if i < 0 || i >= len(m.rows) {
+		return
+	}
+	row := m.rows[i]
+	url := persistURL(row.snap)
+	label := url
+	if row.snap.Kind == ghpr.KindRun && row.snap.WorkflowName != "" {
+		label = row.snap.WorkflowName
+	} else if row.snap.Number > 0 {
+		label = fmt.Sprintf("#%d", row.snap.Number)
+	}
+	if row.pinned {
+		m.cfg.Refs = dropMatching(m.cfg.Refs, row.snap)
+	} else if url != "" {
+		m.hidden = store.MergeURLs(m.hidden, []string{url})
+	}
+	m.rows = append(m.rows[:i], m.rows[i+1:]...)
+	if m.selected >= len(m.rows) {
+		m.selected = max(0, len(m.rows)-1)
+	}
+	m.status = "removed " + label
+	if err := m.persist(); err != nil {
+		m.status = err.Error()
+	}
+}
+
+func persistURL(snap ghpr.Snapshot) string {
+	if snap.URL != "" {
+		return snap.URL
+	}
+	return snap.Input
+}
+
+func (m *model) persist() error {
+	urls := make([]string, 0, len(m.rows))
+	for _, row := range m.rows {
+		if !row.pinned {
+			continue
+		}
+		if u := persistURL(row.snap); u != "" {
+			urls = append(urls, u)
+		}
+	}
+	return store.Save(store.Watch{
+		URLs:   urls,
+		Repo:   m.cfg.Repo,
+		Hidden: m.hidden,
+	})
+}
+
+func (m *model) unhide(ref string) {
+	probe := seedSnap(ref)
+	kept := m.hidden[:0]
+	if kept == nil {
+		kept = []string{}
+	}
+	for _, h := range m.hidden {
+		if ghpr.Same(seedSnap(h), probe) {
+			continue
+		}
+		kept = append(kept, h)
+	}
+	m.hidden = kept
+}
+
+func (m model) isHidden(snap ghpr.Snapshot) bool {
+	return hiddenHas(m.hidden, snap)
+}
+
+func hiddenHas(hidden []string, snap ghpr.Snapshot) bool {
+	for _, h := range hidden {
+		if ghpr.Same(seedSnap(h), snap) {
+			return true
+		}
+	}
+	return false
+}
+
+func dropMatching(refs []string, snap ghpr.Snapshot) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ghpr.Same(seedSnap(ref), snap) {
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out
+}
+
 func (m model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 	latest := msg.seq == m.pollSeq
 	if latest {
@@ -369,7 +479,7 @@ func (m model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 	for _, snap := range msg.discovered {
-		if m.indexOf(snap) >= 0 {
+		if m.indexOf(snap) >= 0 || m.isHidden(snap) {
 			continue
 		}
 		m.rows = append(m.rows, prRow{snap: snap, expanded: true})
@@ -395,6 +505,11 @@ func (m model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.ready {
 		m.viewport.SetContent(m.body())
+	}
+	if latest {
+		if err := m.persist(); err != nil && m.status == "" {
+			m.status = err.Error()
+		}
 	}
 	cmds = append(cmds, tea.SetWindowTitle(m.watchingTitle()))
 
@@ -433,6 +548,7 @@ func (m model) poll() tea.Cmd {
 	rows := append([]prRow(nil), m.rows...)
 	required := m.cfg.Required
 	watchRepo := m.cfg.Repo
+	hidden := append([]string(nil), m.hidden...)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
@@ -449,7 +565,7 @@ func (m model) poll() tea.Cmd {
 					known = append(known, row.snap)
 				}
 				for _, snap := range listed {
-					if indexOfSnaps(known, snap) >= 0 {
+					if indexOfSnaps(known, snap) >= 0 || hiddenHas(hidden, snap) {
 						continue
 					}
 					if !ghpr.Summarize(snap.Checks).Finished() {
