@@ -1,4 +1,4 @@
-module github.com/personal/chores
+module github.com/abit2/chores
 
 go 1.26.1
 

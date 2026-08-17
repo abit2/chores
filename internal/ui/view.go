@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/personal/chores/internal/ghpr"
+	"github.com/abit2/chores/internal/ghpr"
 )
 
 func (m model) View() string {

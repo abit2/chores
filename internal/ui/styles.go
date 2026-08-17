@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/personal/chores/internal/ghpr"
+	"github.com/abit2/chores/internal/ghpr"
 )
 
 type palette struct {

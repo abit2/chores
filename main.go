@@ -9,8 +9,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/personal/chores/internal/ghpr"
-	"github.com/personal/chores/internal/ui"
+	"github.com/abit2/chores/internal/ghpr"
+	"github.com/abit2/chores/internal/ui"
 )
 
 var version = "dev"

@@ -13,8 +13,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/personal/chores/internal/ghpr"
-	"github.com/personal/chores/internal/notify"
+	"github.com/abit2/chores/internal/ghpr"
+	"github.com/abit2/chores/internal/notify"
 )
 
 const fetchTimeout = 30 * time.Second
