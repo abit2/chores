@@ -1,0 +1,6 @@
+/chores
+/ciwatch
+*.exe
+*.test
+*.out
+dist/
