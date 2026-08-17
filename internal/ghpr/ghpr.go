@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -92,6 +93,48 @@ func RepoFromRef(ref string) string {
 		return ""
 	}
 	return m[1] + "/" + m[2]
+}
+
+// NumberFromRef extracts the pull request number from a GitHub URL.
+func NumberFromRef(ref string) int {
+	m := prURLRe.FindStringSubmatch(ref)
+	if len(m) != 4 {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[3])
+	return n
+}
+
+// Identity is the canonical repo + number for a snapshot, when known.
+func Identity(s Snapshot) (repo string, number int) {
+	number = s.Number
+	if number == 0 {
+		number = NumberFromRef(s.URL)
+		if number == 0 {
+			number = NumberFromRef(s.Input)
+		}
+	}
+	repo = s.Repo
+	if repo == "" {
+		repo = RepoFromRef(s.URL)
+		if repo == "" {
+			repo = RepoFromRef(s.Input)
+		}
+	}
+	return repo, number
+}
+
+// SamePR reports whether two snapshots refer to the same pull request.
+func SamePR(a, b Snapshot) bool {
+	ra, na := Identity(a)
+	rb, nb := Identity(b)
+	if na > 0 && na == nb && ra != "" && ra == rb {
+		return true
+	}
+	if a.URL != "" && b.URL != "" && strings.TrimRight(a.URL, "/") == strings.TrimRight(b.URL, "/") {
+		return true
+	}
+	return a.Input != "" && a.Input == b.Input
 }
 
 // Fetch loads PR metadata and checks via gh.

@@ -33,6 +33,21 @@ func TestRepoFromRef(t *testing.T) {
 	if got != "cli/cli" {
 		t.Fatalf("got %q", got)
 	}
+	if n := NumberFromRef("https://github.com/cli/cli/pull/9079/files"); n != 9079 {
+		t.Fatalf("number=%d", n)
+	}
+}
+
+func TestSamePR(t *testing.T) {
+	a := Snapshot{Input: "https://github.com/cli/cli/pull/1", Repo: "cli/cli", Number: 1, URL: "https://github.com/cli/cli/pull/1"}
+	b := Snapshot{Input: "https://github.com/cli/cli/pull/1/files", Repo: "cli/cli", Number: 1}
+	if !SamePR(a, b) {
+		t.Fatal("expected same PR for URL variants")
+	}
+	c := Snapshot{Input: "https://github.com/cli/cli/pull/2", Repo: "cli/cli", Number: 2}
+	if SamePR(a, c) {
+		t.Fatal("different numbers should not match")
+	}
 }
 
 func TestSummarizeFinished(t *testing.T) {

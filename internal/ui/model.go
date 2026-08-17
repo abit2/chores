@@ -33,6 +33,7 @@ type mode int
 const (
 	modeInput mode = iota
 	modeWatch
+	modeAdd
 )
 
 type prRow struct {
@@ -52,6 +53,7 @@ type model struct {
 	rows     []prRow
 	selected int
 	polling  bool
+	pollSeq  int
 	lastPoll time.Time
 	status   string
 	width    int
@@ -59,6 +61,7 @@ type model struct {
 }
 
 type pollMsg struct {
+	seq   int
 	snaps []ghpr.Snapshot
 }
 
@@ -93,6 +96,7 @@ func New(cfg Config) tea.Model {
 		m.mode = modeWatch
 		m.rows = rowsFromRefs(cfg.Refs)
 		m.polling = true
+		m.pollSeq = 1
 	} else {
 		m.mode = modeInput
 	}
@@ -122,40 +126,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.SetWidth(max(20, msg.Width-8))
-		if !m.ready {
-			m.viewport = viewport.New(max(20, msg.Width-2), max(5, msg.Height-8))
-			m.ready = true
-		} else {
-			m.viewport.Width = max(20, msg.Width-2)
-			m.viewport.Height = max(5, msg.Height-8)
-		}
-		m.viewport.SetContent(m.body())
+		m.layout()
 		return m, nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if m.ready && m.mode == modeWatch {
+		if m.ready && m.watching() {
 			m.viewport.SetContent(m.body())
 		}
 		return m, cmd
 
 	case tea.KeyMsg:
-		if m.mode == modeInput {
+		switch m.mode {
+		case modeInput:
 			return m.updateInput(msg)
+		case modeAdd:
+			return m.updateAdd(msg)
+		default:
+			return m.updateWatch(msg)
 		}
-		return m.updateWatch(msg)
 
 	case tickMsg:
-		if m.mode != modeWatch || m.polling {
+		if !m.watching() || m.polling {
 			return m, tick(m.cfg.Interval)
 		}
-		m.polling = true
-		return m, tea.Batch(m.poll(), tick(m.cfg.Interval))
+		return m, tea.Batch(m.startPoll(), tick(m.cfg.Interval))
 
 	case pollMsg:
-		return m.applyPoll(msg.snaps)
+		return m.applyPoll(msg)
 
 	case notifiedMsg:
 		if msg.index >= 0 && msg.index < len(m.rows) {
@@ -164,7 +163,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.mode == modeInput {
+	if m.mode == modeInput || m.mode == modeAdd {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
@@ -176,22 +175,98 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "esc":
 		return m, tea.Quit
-	case "ctrl+s", "ctrl+d":
-		refs := ghpr.ParseRefs([]string{m.input.Value()})
-		if len(refs) == 0 {
-			m.status = "paste at least one PR URL"
-			return m, nil
-		}
-		m.cfg.Refs = refs
-		m.rows = rowsFromRefs(refs)
-		m.mode = modeWatch
-		m.polling = true
-		m.status = ""
-		return m, tea.Batch(m.spinner.Tick, m.poll(), tick(m.cfg.Interval), tea.SetWindowTitle("CI Watcher"))
+	case "ctrl+s", "ctrl+d", "enter":
+		return m.submitInput(true)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+func (m model) updateAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.mode = modeWatch
+		m.status = ""
+		m.input.Blur()
+		m.layout()
+		return m, nil
+	case "ctrl+s", "ctrl+d", "enter":
+		return m.submitInput(false)
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+func (m model) submitInput(startTicker bool) (tea.Model, tea.Cmd) {
+	refs := ghpr.ParseRefs([]string{m.input.Value()})
+	if len(refs) == 0 {
+		m.status = "paste at least one PR URL"
+		return m, nil
+	}
+	added, skipped := m.appendRefs(refs)
+	if added == 0 {
+		if skipped > 0 {
+			m.status = "already watching " + pluralize(skipped, "that PR", "those PRs")
+		} else {
+			m.status = "paste at least one PR URL"
+		}
+		return m, nil
+	}
+	m.mode = modeWatch
+	m.status = addStatus(added, skipped)
+	m.input.Reset()
+	m.input.Blur()
+	if m.selected < 0 || m.selected >= len(m.rows) {
+		m.selected = 0
+	}
+	m.layout()
+	cmds := []tea.Cmd{m.startPoll(), tea.SetWindowTitle(m.watchingTitle())}
+	if startTicker {
+		cmds = append(cmds, m.spinner.Tick, tick(m.cfg.Interval))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m *model) appendRefs(refs []string) (added, skipped int) {
+	firstNew := -1
+	for _, ref := range refs {
+		if m.hasRef(ref) {
+			skipped++
+			continue
+		}
+		m.rows = append(m.rows, prRow{
+			snap:     ghpr.Snapshot{Input: ref, Repo: ghpr.RepoFromRef(ref)},
+			expanded: true,
+		})
+		m.cfg.Refs = append(m.cfg.Refs, ref)
+		if firstNew < 0 {
+			firstNew = len(m.rows) - 1
+		}
+		added++
+	}
+	if firstNew >= 0 {
+		m.selected = firstNew
+	}
+	return added, skipped
+}
+
+func (m model) hasRef(ref string) bool {
+	probe := ghpr.Snapshot{
+		Input:  ref,
+		URL:    ref,
+		Repo:   ghpr.RepoFromRef(ref),
+		Number: ghpr.NumberFromRef(ref),
+	}
+	for _, row := range m.rows {
+		if ghpr.SamePR(row.snap, probe) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -199,12 +274,14 @@ func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "j", "down":
+		m.status = ""
 		if m.selected < len(m.rows)-1 {
 			m.selected++
 		}
 		m.viewport.SetContent(m.body())
 		return m, nil
 	case "k", "up":
+		m.status = ""
 		if m.selected > 0 {
 			m.selected--
 		}
@@ -220,8 +297,16 @@ func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.polling {
 			return m, nil
 		}
-		m.polling = true
-		return m, m.poll()
+		return m, m.startPoll()
+	case "a", "+":
+		m.mode = modeAdd
+		m.status = ""
+		m.input.Reset()
+		m.input.SetHeight(3)
+		m.input.Placeholder = "https://github.com/org/repo/pull/123"
+		m.input.Focus()
+		m.layout()
+		return m, textarea.Blink
 	case "o":
 		if len(m.rows) == 0 {
 			return m, nil
@@ -235,26 +320,23 @@ func (m model) updateWatch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) applyPoll(snaps []ghpr.Snapshot) (tea.Model, tea.Cmd) {
-	m.polling = false
-	m.lastPoll = time.Now()
-	if len(snaps) != len(m.rows) {
-		m.rows = make([]prRow, len(snaps))
-		for i := range snaps {
-			m.rows[i].expanded = true
-		}
+func (m model) applyPoll(msg pollMsg) (tea.Model, tea.Cmd) {
+	latest := msg.seq == m.pollSeq
+	if latest {
+		m.polling = false
+		m.lastPoll = time.Now()
 	}
 
 	var cmds []tea.Cmd
-	finished := 0
-	for i, snap := range snaps {
+	for _, snap := range msg.snaps {
+		i := m.indexOf(snap)
+		if i < 0 {
+			continue
+		}
 		prev := m.rows[i]
 		wasFinished := ghpr.Summarize(prev.snap.Checks).Finished()
 		nowFinished := ghpr.Summarize(snap.Checks).Finished()
 		m.rows[i].snap = snap
-		if nowFinished {
-			finished++
-		}
 		if nowFinished && !wasFinished && !prev.notified {
 			cmds = append(cmds, pingCmd(i, snap, !m.cfg.NoSound))
 		}
@@ -270,7 +352,7 @@ func (m model) applyPoll(snaps []ghpr.Snapshot) (tea.Model, tea.Cmd) {
 	}
 	cmds = append(cmds, tea.SetWindowTitle(m.watchingTitle()))
 
-	if m.cfg.ExitDone && finished == len(m.rows) && len(m.rows) > 0 {
+	if latest && m.cfg.ExitDone && len(m.rows) > 0 {
 		allDone := true
 		for _, row := range m.rows {
 			if row.snap.Err != nil || !ghpr.Summarize(row.snap.Checks).Finished() {
@@ -285,7 +367,23 @@ func (m model) applyPoll(snaps []ghpr.Snapshot) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m model) indexOf(snap ghpr.Snapshot) int {
+	for i, row := range m.rows {
+		if ghpr.SamePR(row.snap, snap) {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *model) startPoll() tea.Cmd {
+	m.pollSeq++
+	m.polling = true
+	return m.poll()
+}
+
 func (m model) poll() tea.Cmd {
+	seq := m.pollSeq
 	rows := append([]prRow(nil), m.rows...)
 	required := m.cfg.Required
 	return func() tea.Msg {
@@ -305,7 +403,7 @@ func (m model) poll() tea.Cmd {
 			}(i, row)
 		}
 		wg.Wait()
-		return pollMsg{snaps: snaps}
+		return pollMsg{seq: seq, snaps: snaps}
 	}
 }
 
@@ -418,6 +516,46 @@ func (m model) headerLine() string {
 	right := muted.Render(strings.Join(bits, " · "))
 	gap := max(1, m.width-lipgloss.Width(left)-lipgloss.Width(right)-2)
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func (m model) watching() bool {
+	return m.mode == modeWatch || m.mode == modeAdd
+}
+
+func (m *model) layout() {
+	if m.width == 0 {
+		return
+	}
+	chrome := 6
+	if m.mode == modeAdd {
+		chrome = 14
+	}
+	m.input.SetWidth(max(20, m.width-8))
+	vw := max(20, m.width-2)
+	vh := max(3, m.height-chrome)
+	if !m.ready {
+		m.viewport = viewport.New(vw, vh)
+		m.ready = true
+	} else {
+		m.viewport.Width = vw
+		m.viewport.Height = vh
+	}
+	m.viewport.SetContent(m.body())
+}
+
+func addStatus(added, skipped int) string {
+	s := fmt.Sprintf("added %d PR%s", added, plural(added))
+	if skipped > 0 {
+		s += fmt.Sprintf(" · skipped %d duplicate%s", skipped, plural(skipped))
+	}
+	return s
+}
+
+func pluralize(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func plural(n int) string {

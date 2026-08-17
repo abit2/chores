@@ -23,12 +23,12 @@ func (m model) viewInput() string {
 	title, muted, help := m.styles()
 	var b strings.Builder
 	b.WriteString(title.Render("CI Watcher") + "\n")
-	b.WriteString(muted.Render("Paste GitHub PR URLs, then ctrl+s to start watching.") + "\n\n")
+	b.WriteString(muted.Render("Paste GitHub PR URLs, then enter to start watching.") + "\n\n")
 	b.WriteString(m.input.View() + "\n")
 	if m.status != "" {
 		b.WriteString("\n" + bucketStyle("fail").Render(m.status) + "\n")
 	}
-	b.WriteString("\n" + help.Render("ctrl+s start  ·  esc quit") + "\n")
+	b.WriteString("\n" + help.Render("enter add  ·  esc quit") + "\n")
 	return b.String()
 }
 
@@ -39,8 +39,34 @@ func (m model) viewWatch() string {
 	if m.ready {
 		body = m.viewport.View()
 	}
-	footer := help.Render("j/k select  ·  enter checks  ·  o browser  ·  r refresh  ·  q quit")
-	return header + "\n\n" + body + "\n" + footer
+	parts := []string{header, "", body}
+	if m.status != "" && m.mode != modeAdd {
+		parts = append(parts, "", lipgloss.NewStyle().Foreground(colors().pending).Render(m.status))
+	}
+	if m.mode == modeAdd {
+		parts = append(parts, "", m.viewAddPanel())
+	} else {
+		parts = append(parts, help.Render("a add  ·  j/k select  ·  enter checks  ·  o browser  ·  r refresh  ·  q quit"))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (m model) viewAddPanel() string {
+	c := colors()
+	title := lipgloss.NewStyle().Bold(true).Foreground(c.accent).Render("Add pull requests")
+	hint := lipgloss.NewStyle().Foreground(c.muted).Render("enter / ctrl+s add  ·  esc cancel")
+	var body strings.Builder
+	body.WriteString(title + "\n")
+	body.WriteString(m.input.View())
+	if m.status != "" {
+		body.WriteString("\n" + bucketStyle("fail").Render(m.status))
+	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(c.accent).
+		Padding(0, 1).
+		Width(max(20, m.width-2))
+	return box.Render(body.String()) + "\n" + hint
 }
 
 func (m model) body() string {
