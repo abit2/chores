@@ -14,8 +14,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-var version = "dev"
-
 func main() {
 	var interval time.Duration
 	flag.DurationVar(&interval, "interval", 10*time.Second, "how often to poll CI")
@@ -51,7 +49,7 @@ Flags:
 	flag.Parse()
 
 	if *printVersion {
-		fmt.Println(version)
+		fmt.Println(resolveVersion())
 		os.Exit(0)
 	}
 
