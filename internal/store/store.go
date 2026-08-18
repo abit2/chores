@@ -5,15 +5,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/abit2/chores/internal/ghpr"
 )
 
 // Watch is the persisted watch list.
 type Watch struct {
-	URLs   []string `json:"urls"`
-	Repo   string   `json:"repo,omitempty"`
-	Hidden []string `json:"hidden,omitempty"`
+	URLs     []string  `json:"urls"`
+	Repo     string    `json:"repo,omitempty"`
+	Hidden   []string  `json:"hidden,omitempty"`
+	LastPoll time.Time `json:"lastPoll,omitempty"`
 }
 
 // Path is the JSON file used to remember watched URLs.
