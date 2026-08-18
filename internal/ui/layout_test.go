@@ -99,13 +99,13 @@ func smallWatchModel() model {
 		pass = append(pass, ghpr.Check{Name: fmt.Sprintf("ok-%d", i), Bucket: "pass"})
 	}
 	m.rows = []prRow{
-		{snap: ghpr.Snapshot{Kind: ghpr.KindPR, Number: 1032, Title: "fix the widget", Repo: "workato/genie-core", Author: "ArtemMk", HeadRefName: "fix/widget", Checks: fail}, notified: true},
-		{snap: ghpr.Snapshot{Kind: ghpr.KindPR, Number: 996, Title: "ship it", Repo: "workato/genie-core", Author: "abit2", HeadRefName: "ship", Checks: pass}, notified: true},
-		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "WRBOT-3147", Repo: "workato.atlassian.net", Title: ""}},
-		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "WRBOT-3257", Repo: "workato.atlassian.net", Title: ""}},
-		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "WRBOT-3301", Repo: "workato.atlassian.net", Title: ""}},
-		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "WRBOT-3302", Repo: "workato.atlassian.net", Title: ""}},
-		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "WRBOT-3303", Repo: "workato.atlassian.net", Title: ""}},
+		{snap: ghpr.Snapshot{Kind: ghpr.KindPR, Number: 1032, Title: "fix the widget", Repo: "acme/repo", Author: "Arthur", HeadRefName: "fix/widget", Checks: fail}, notified: true},
+		{snap: ghpr.Snapshot{Kind: ghpr.KindPR, Number: 996, Title: "ship it", Repo: "acme/repo", Author: "abit2", HeadRefName: "ship", Checks: pass}, notified: true},
+		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "PROJ-3147", Repo: "acme.atlassian.net", Title: ""}},
+		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "PROJ-3257", Repo: "acme.atlassian.net", Title: ""}},
+		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "PROJ-3301", Repo: "acme.atlassian.net", Title: ""}},
+		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "PROJ-3302", Repo: "acme.atlassian.net", Title: ""}},
+		{snap: ghpr.Snapshot{Kind: ghpr.KindJira, IssueKey: "PROJ-3303", Repo: "acme.atlassian.net", Title: ""}},
 	}
 	return m
 }

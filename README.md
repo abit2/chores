@@ -56,7 +56,7 @@ CHORES_WATCH_FILE=./watch.json chores --repo owner/repo
 
 `chores -h` prints the path currently in use.
 
-Slack/Jira desktop notifications are appended to `notifications.json` in the same directory, grouped by issue key (`UI-1234`) in the order they were received. Override with `CHORES_NOTES_FILE`.
+Slack/Jira desktop notifications are appended to `notifications.json` in the same directory, grouped by issue key (`TASK-1234`) in the order they were received. Override with `CHORES_NOTES_FILE`.
 
 GitHub PR and Actions snapshots (title, checks, last refresh time) are saved to `prs.json` in the same directory. Override with `CHORES_PR_FILE`. Press `r` to refresh the selected card, `R` to refresh everything.
 
@@ -69,15 +69,15 @@ On macOS, grant **Full Disk Access** to the terminal (or `chores`) in System Set
 Pin a ticket if you want, or let chores pick up issue keys from incoming Slack/Jira notifications:
 
 ```bash
-chores https://xyz-company.atlassian.net/browse/UI-5947
-chores UI-5947
+chores https://xyz-company.atlassian.net/browse/TASK-5947
+chores TASK-5947
 ```
 
 Bare keys use `JIRA_SITE` or `--jira-site` only to open the browse URL with `o`:
 
 ```bash
 export JIRA_SITE="xyz-company.atlassian.net"
-chores UI-5947
+chores TASK-5947
 ```
 
 You'll get a ping when a new Slack notification arrives for that issue.
@@ -90,7 +90,7 @@ Press `c` to clear saved notifications for the selected Jira key, or `N` to clea
 chores
 chores https://github.com/org/repo/pull/123
 chores --repo owner/repo
-chores https://xyz-company.atlassian.net/browse/UI-5947
+chores https://xyz-company.atlassian.net/browse/TASK-5947
 ```
 
 Keys: `a` add · `d` remove · `C` clear list · `c` clear notes · `N` clear all notes · `j`/`k` select · `enter` expand · `o` open · `r` refresh · `R` refresh all · `q` quit

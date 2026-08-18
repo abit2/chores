@@ -49,11 +49,11 @@ comma-separated. If none are given, saved URLs are loaded. You can also paste
 them in the TUI or pipe URLs on stdin.
 
   chores --repo owner/repo     watch recent Actions runs for a repository
-  chores https://xyz-company.atlassian.net/browse/UI-5947
+  chores https://xyz-company.atlassian.net/browse/TASK-5947
 
 Jira is filled from Slack desktop notifications (the Jira Slack app), not the
 Jira API. On macOS, grant Full Disk Access to your terminal so chores can read
-Notification Center. Bare keys like UI-5947 can use JIRA_SITE / --jira-site
+Notification Center. Bare keys like TASK-5947 can use JIRA_SITE / --jira-site
 to open the browse URL.
 
 Watch list: %s

@@ -27,26 +27,26 @@ func TestAppendNotesGroupedByKeyInReceivedOrder(t *testing.T) {
 	later := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	earlier := later.Add(-time.Hour)
 	err := appendNotes([]macnotify.Note{
-		{Title: "Jira", Body: "commented on UI-1234 later", Delivered: later},
-		{Title: "Jira", Body: "assigned UI-1234 first", Delivered: earlier},
-		{Title: "Jira", Body: "also WRBOT-9", Delivered: later},
+		{Title: "Jira", Body: "commented on TASK-1234 later", Delivered: later},
+		{Title: "Jira", Body: "assigned TASK-1234 first", Delivered: earlier},
+		{Title: "Jira", Body: "also PROJ-9", Delivered: later},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	log := readNotes(t, path)
-	if len(log["UI-1234"]) != 2 {
-		t.Fatalf("UI-1234=%+v", log["UI-1234"])
+	if len(log["TASK-1234"]) != 2 {
+		t.Fatalf("TASK-1234=%+v", log["TASK-1234"])
 	}
-	if log["UI-1234"][0].Body != "assigned UI-1234 first" {
-		t.Fatalf("want oldest first, got %+v", log["UI-1234"])
+	if log["TASK-1234"][0].Body != "assigned TASK-1234 first" {
+		t.Fatalf("want oldest first, got %+v", log["TASK-1234"])
 	}
-	if log["UI-1234"][1].Body != "commented on UI-1234 later" {
-		t.Fatalf("want newest last, got %+v", log["UI-1234"])
+	if log["TASK-1234"][1].Body != "commented on TASK-1234 later" {
+		t.Fatalf("want newest last, got %+v", log["TASK-1234"])
 	}
-	if len(log["WRBOT-9"]) != 1 || log["WRBOT-9"][0].Body != "also WRBOT-9" {
-		t.Fatalf("WRBOT-9=%+v", log["WRBOT-9"])
+	if len(log["PROJ-9"]) != 1 || log["PROJ-9"][0].Body != "also PROJ-9" {
+		t.Fatalf("PROJ-9=%+v", log["PROJ-9"])
 	}
 }
 
@@ -57,21 +57,21 @@ func TestAppendNotesDedupsAndKeepsHistory(t *testing.T) {
 	t.Setenv("CHORES_NOTES_FILE", path)
 
 	first := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
-	n1 := macnotify.Note{Title: "Jira", Body: "assigned UI-1", Delivered: first}
+	n1 := macnotify.Note{Title: "Jira", Body: "assigned TASK-1", Delivered: first}
 	if err := appendNotes([]macnotify.Note{n1}); err != nil {
 		t.Fatal(err)
 	}
 	if err := appendNotes([]macnotify.Note{n1}); err != nil {
 		t.Fatal(err)
 	}
-	n2 := macnotify.Note{Title: "Jira", Body: "commented UI-1", Delivered: first.Add(time.Minute)}
+	n2 := macnotify.Note{Title: "Jira", Body: "commented TASK-1", Delivered: first.Add(time.Minute)}
 	if err := appendNotes([]macnotify.Note{n1, n2}); err != nil {
 		t.Fatal(err)
 	}
 
 	log := readNotes(t, path)
-	if len(log["UI-1"]) != 2 {
-		t.Fatalf("UI-1=%+v", log["UI-1"])
+	if len(log["TASK-1"]) != 2 {
+		t.Fatalf("TASK-1=%+v", log["TASK-1"])
 	}
 }
 
@@ -112,41 +112,41 @@ func TestClearKeyDropsOldNotes(t *testing.T) {
 
 	old := time.Now().UTC().Add(-time.Minute)
 	if err := appendNotes([]macnotify.Note{
-		{Title: "Jira", Body: "assigned UI-1234", Delivered: old},
-		{Title: "Jira", Body: "also WRBOT-9", Delivered: old},
+		{Title: "Jira", Body: "assigned TASK-1234", Delivered: old},
+		{Title: "Jira", Body: "also PROJ-9", Delivered: old},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ClearKey("ui-1234"); err != nil {
+	if err := ClearKey("task-1234"); err != nil {
 		t.Fatal(err)
 	}
 	log := readNoteFile(t, path)
-	if _, ok := log.Issues["UI-1234"]; ok {
-		t.Fatalf("UI-1234 still present: %+v", log.Issues)
+	if _, ok := log.Issues["TASK-1234"]; ok {
+		t.Fatalf("TASK-1234 still present: %+v", log.Issues)
 	}
-	if len(log.Issues["WRBOT-9"]) != 1 {
-		t.Fatalf("WRBOT-9=%+v", log.Issues["WRBOT-9"])
+	if len(log.Issues["PROJ-9"]) != 1 {
+		t.Fatalf("PROJ-9=%+v", log.Issues["PROJ-9"])
 	}
 
 	if err := appendNotes([]macnotify.Note{
-		{Title: "Jira", Body: "assigned UI-1234", Delivered: old},
+		{Title: "Jira", Body: "assigned TASK-1234", Delivered: old},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	log = readNoteFile(t, path)
-	if _, ok := log.Issues["UI-1234"]; ok {
+	if _, ok := log.Issues["TASK-1234"]; ok {
 		t.Fatal("cleared key came back from old notification")
 	}
 
 	newer := time.Now().UTC().Add(time.Second)
 	if err := appendNotes([]macnotify.Note{
-		{Title: "Jira", Body: "commented UI-1234 later", Delivered: newer},
+		{Title: "Jira", Body: "commented TASK-1234 later", Delivered: newer},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	log = readNoteFile(t, path)
-	if len(log.Issues["UI-1234"]) != 1 {
-		t.Fatalf("new note should save: %+v", log.Issues["UI-1234"])
+	if len(log.Issues["TASK-1234"]) != 1 {
+		t.Fatalf("new note should save: %+v", log.Issues["TASK-1234"])
 	}
 }
 
@@ -157,8 +157,8 @@ func TestClearAllDropsEverything(t *testing.T) {
 	t.Setenv("CHORES_NOTES_FILE", path)
 	old := time.Now().UTC().Add(-time.Minute)
 	if err := appendNotes([]macnotify.Note{
-		{Title: "Jira", Body: "UI-1 hello", Delivered: old},
-		{Title: "Jira", Body: "UI-2 hello", Delivered: old},
+		{Title: "Jira", Body: "TASK-1 hello", Delivered: old},
+		{Title: "Jira", Body: "TASK-2 hello", Delivered: old},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestClearAllDropsEverything(t *testing.T) {
 		t.Fatalf("issues=%+v", log.Issues)
 	}
 	if err := appendNotes([]macnotify.Note{
-		{Title: "Jira", Body: "UI-1 hello", Delivered: old},
+		{Title: "Jira", Body: "TASK-1 hello", Delivered: old},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,8 +183,8 @@ func TestClearAllDropsEverything(t *testing.T) {
 func TestLoadLegacyNotesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "notifications.json")
 	legacy := `{
-  "UI-1": [
-    {"received": "2026-08-17T10:00:00Z", "body": "hello UI-1"}
+  "TASK-1": [
+    {"received": "2026-08-17T10:00:00Z", "body": "hello TASK-1"}
   ]
 }
 `
@@ -195,7 +195,7 @@ func TestLoadLegacyNotesFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(log.Issues["UI-1"]) != 1 || log.Issues["UI-1"][0].Body != "hello UI-1" {
+	if len(log.Issues["TASK-1"]) != 1 || log.Issues["TASK-1"][0].Body != "hello TASK-1" {
 		t.Fatalf("%+v", log.Issues)
 	}
 }

@@ -10,42 +10,42 @@ import (
 )
 
 func TestParseBrowseURL(t *testing.T) {
-	ref, ok := Parse("https://xyz-company.atlassian.net/browse/UI-5947")
+	ref, ok := Parse("https://xyz-company.atlassian.net/browse/TASK-5947")
 	if !ok {
 		t.Fatal("expected parse")
 	}
-	if ref.Host != "xyz-company.atlassian.net" || ref.Key != "UI-5947" {
+	if ref.Host != "xyz-company.atlassian.net" || ref.Key != "TASK-5947" {
 		t.Fatalf("got %+v", ref)
 	}
-	if ref.BrowseURL() != "https://xyz-company.atlassian.net/browse/UI-5947" {
+	if ref.BrowseURL() != "https://xyz-company.atlassian.net/browse/TASK-5947" {
 		t.Fatalf("url=%s", ref.BrowseURL())
 	}
 }
 
 func TestParseBrowseURLWithQuery(t *testing.T) {
-	ref, ok := Parse("https://xyz-company.atlassian.net/browse/UI-5947?focusedCommentId=1")
-	if !ok || ref.Key != "UI-5947" {
+	ref, ok := Parse("https://xyz-company.atlassian.net/browse/TASK-5947?focusedCommentId=1")
+	if !ok || ref.Key != "TASK-5947" {
 		t.Fatalf("got ok=%v %+v", ok, ref)
 	}
 }
 
 func TestParseSelectedIssue(t *testing.T) {
-	ref, ok := Parse("https://xyz-company.atlassian.net/jira/software/c/projects/UI/boards/1?selectedIssue=UI-5947")
+	ref, ok := Parse("https://xyz-company.atlassian.net/jira/software/c/projects/TASK/boards/1?selectedIssue=TASK-5947")
 	if !ok {
 		t.Fatal("expected parse")
 	}
-	if ref.Host != "xyz-company.atlassian.net" || ref.Key != "UI-5947" {
+	if ref.Host != "xyz-company.atlassian.net" || ref.Key != "TASK-5947" {
 		t.Fatalf("got %+v", ref)
 	}
 }
 
 func TestParseKeyUsesSite(t *testing.T) {
 	t.Setenv("JIRA_SITE", "https://xyz-company.atlassian.net/")
-	ref, ok := Parse("ui-5947")
+	ref, ok := Parse("task-5947")
 	if !ok {
 		t.Fatal("expected parse")
 	}
-	if ref.Host != "xyz-company.atlassian.net" || ref.Key != "UI-5947" {
+	if ref.Host != "xyz-company.atlassian.net" || ref.Key != "TASK-5947" {
 		t.Fatalf("got %+v", ref)
 	}
 }
@@ -62,15 +62,15 @@ func TestParseRejectsGitHub(t *testing.T) {
 func TestApplyNotesMatchesKey(t *testing.T) {
 	resetNoteState()
 	t.Cleanup(resetNoteState)
-	issue := Issue{Key: "UI-5947", Host: "xyz-company.atlassian.net"}
+	issue := Issue{Key: "TASK-5947", Host: "xyz-company.atlassian.net"}
 	applyNotes(&issue, []macnotify.Note{
 		{
 			Title:     "Jira",
-			Body:      "Ada commented on UI-5947 Fix the picker",
+			Body:      "Ada commented on TASK-5947 Fix the picker",
 			Delivered: time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC),
 		},
 	})
-	if issue.Title != "Ada commented on UI-5947 Fix the picker" {
+	if issue.Title != "Ada commented on TASK-5947 Fix the picker" {
 		t.Fatalf("title=%q", issue.Title)
 	}
 	if issue.Status != "via Slack" {
@@ -85,17 +85,17 @@ func TestGroupNotesByKey(t *testing.T) {
 	resetNoteState()
 	t.Cleanup(resetNoteState)
 	issues := groupNotes([]macnotify.Note{
-		{Title: "Jira", Body: "assigned UI-1", Delivered: time.Unix(1, 0)},
-		{Title: "Jira", Body: "commented UI-1 later", Delivered: time.Unix(2, 0)},
-		{Title: "Jira", Body: "also UI-2", Delivered: time.Unix(3, 0)},
+		{Title: "Jira", Body: "assigned TASK-1", Delivered: time.Unix(1, 0)},
+		{Title: "Jira", Body: "commented TASK-1 later", Delivered: time.Unix(2, 0)},
+		{Title: "Jira", Body: "also TASK-2", Delivered: time.Unix(3, 0)},
 	})
 	if len(issues) != 2 {
 		t.Fatalf("len=%d %+v", len(issues), issues)
 	}
-	if issues[0].Key != "UI-1" || !strings.Contains(issues[0].Title, "later") {
+	if issues[0].Key != "TASK-1" || !strings.Contains(issues[0].Title, "later") {
 		t.Fatalf("first=%+v", issues[0])
 	}
-	if issues[1].Key != "UI-2" {
+	if issues[1].Key != "TASK-2" {
 		t.Fatalf("second=%+v", issues[1])
 	}
 }

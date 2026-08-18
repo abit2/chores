@@ -78,7 +78,7 @@ func TestSavePRsSkipsJira(t *testing.T) {
 	t.Setenv("CHORES_PR_FILE", filepath.Join(dir, "prs.json"))
 	if err := SavePRs([]ghpr.Snapshot{{
 		Kind:     ghpr.KindJira,
-		IssueKey: "UI-1",
+		IssueKey: "TASK-1",
 		Title:    "nope",
 	}}); err != nil {
 		t.Fatal(err)

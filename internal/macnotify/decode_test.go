@@ -16,7 +16,7 @@ func TestDecodeRequest(t *testing.T) {
 		<key>subt</key>
 		<string>xyz-company</string>
 		<key>body</key>
-		<string>Ada commented on UI-5947</string>
+		<string>Ada commented on TASK-5947</string>
 	</dict>
 </dict>
 </plist>`
@@ -24,14 +24,14 @@ func TestDecodeRequest(t *testing.T) {
 	if app != "com.tinyspeck.slackmacgap" {
 		t.Fatalf("app=%q", app)
 	}
-	if title != "Jira" || subtitle != "xyz-company" || body != "Ada commented on UI-5947" {
+	if title != "Jira" || subtitle != "xyz-company" || body != "Ada commented on TASK-5947" {
 		t.Fatalf("%q %q %q", title, subtitle, body)
 	}
 }
 
 func TestIssueKeys(t *testing.T) {
-	got := IssueKeys("Ada commented on UI-5947 and also UI-1")
-	if len(got) != 2 || got[0] != "UI-5947" || got[1] != "UI-1" {
+	got := IssueKeys("Ada commented on TASK-5947 and also TASK-1")
+	if len(got) != 2 || got[0] != "TASK-5947" || got[1] != "TASK-1" {
 		t.Fatalf("%v", got)
 	}
 }
@@ -40,7 +40,7 @@ func TestLooksLikeJira(t *testing.T) {
 	if !looksLikeJira(Note{Title: "Jira", Body: "hello"}) {
 		t.Fatal("title jira")
 	}
-	if !looksLikeJira(Note{Body: "please see UI-9"}) {
+	if !looksLikeJira(Note{Body: "please see TASK-9"}) {
 		t.Fatal("issue key")
 	}
 	if looksLikeJira(Note{Title: "Slack", Body: "lunch?"}) {

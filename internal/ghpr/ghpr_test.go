@@ -169,7 +169,7 @@ func TestFetchRun(t *testing.T) {
 }
 
 func TestNeedsPRView(t *testing.T) {
-	if needsPRView(Snapshot{Kind: KindJira, IssueKey: "UI-1"}) {
+	if needsPRView(Snapshot{Kind: KindJira, IssueKey: "TASK-1"}) {
 		t.Fatal("jira")
 	}
 	if needsPRView(Snapshot{Kind: KindRun, RunID: 1}) {
@@ -192,7 +192,7 @@ func TestSkipGitHubPoll(t *testing.T) {
 	if !SkipGitHubPoll(done) {
 		t.Fatal("finished CI should skip interval polls")
 	}
-	jira := Snapshot{Kind: KindJira, IssueKey: "UI-1"}
+	jira := Snapshot{Kind: KindJira, IssueKey: "TASK-1"}
 	if SkipGitHubPoll(jira) {
 		t.Fatal("jira still comes from Slack")
 	}
