@@ -167,3 +167,33 @@ func TestFetchRun(t *testing.T) {
 		t.Fatalf("expected finished, checks=%+v", s.Checks)
 	}
 }
+
+func TestNeedsPRView(t *testing.T) {
+	if needsPRView(Snapshot{Kind: KindJira, IssueKey: "UI-1"}) {
+		t.Fatal("jira")
+	}
+	if needsPRView(Snapshot{Kind: KindRun, RunID: 1}) {
+		t.Fatal("run")
+	}
+	if !needsPRView(Snapshot{Input: "https://github.com/cli/cli/pull/1"}) {
+		t.Fatal("new PR needs view")
+	}
+	if needsPRView(Snapshot{Kind: KindPR, Number: 1, URL: "https://github.com/cli/cli/pull/1"}) {
+		t.Fatal("already viewed")
+	}
+}
+
+func TestSkipGitHubPoll(t *testing.T) {
+	pending := Snapshot{Kind: KindPR, Number: 1, URL: "https://github.com/cli/cli/pull/1", Checks: []Check{{Bucket: "pending"}}}
+	if SkipGitHubPoll(pending) {
+		t.Fatal("pending CI must still poll")
+	}
+	done := Snapshot{Kind: KindPR, Number: 1, URL: "https://github.com/cli/cli/pull/1", Checks: []Check{{Bucket: "pass"}}}
+	if !SkipGitHubPoll(done) {
+		t.Fatal("finished CI should skip interval polls")
+	}
+	jira := Snapshot{Kind: KindJira, IssueKey: "UI-1"}
+	if SkipGitHubPoll(jira) {
+		t.Fatal("jira still comes from Slack")
+	}
+}

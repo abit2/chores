@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/abit2/chores/internal/jira"
 )
 
 // Check is one GitHub status check or Actions job from `gh pr checks --json`.
@@ -29,28 +31,34 @@ type Check struct {
 type Kind string
 
 const (
-	KindPR  Kind = "pr"
-	KindRun Kind = "run"
+	KindPR   Kind = "pr"
+	KindRun  Kind = "run"
+	KindJira Kind = "jira"
 )
 
 // Snapshot is the latest CI picture for one pull request or Actions run.
 type Snapshot struct {
-	Kind         Kind
-	Input        string
-	Number       int
-	RunID        int64
-	Title        string
-	URL          string
-	State        string
-	IsDraft      bool
-	HeadRefName  string
-	Author       string
-	Repo         string
-	WorkflowName string
-	Event        string
-	Checks       []Check
-	Err          error
-	FetchedAt    time.Time
+	Kind          Kind
+	Input         string
+	Number        int
+	RunID         int64
+	Title         string
+	URL           string
+	State         string
+	IsDraft       bool
+	HeadRefName   string
+	Author        string
+	Repo          string
+	WorkflowName  string
+	Event         string
+	IssueKey      string
+	IssueType     string
+	Priority      string
+	Updated       string
+	LastCommenter string
+	Checks        []Check
+	Err           error
+	FetchedAt     time.Time
 }
 
 // Summary counts checks by gh bucket.
@@ -77,6 +85,9 @@ type prView struct {
 var (
 	prURLRe  = regexp.MustCompile(`(?i)(?:github\.com[:/])([^/]+)/([^/]+)/pull/(\d+)`)
 	runURLRe = regexp.MustCompile(`(?i)(?:github\.com[:/])([^/]+)/([^/]+)/actions/runs/(\d+)`)
+	// GitHub allows 100 concurrent API requests and 2,000 GraphQL points/minute.
+	// Keep gh calls serial-ish so interval polls do not trip secondary limits.
+	ghGate = make(chan struct{}, 2)
 )
 
 // ParseRefs splits CLI args, commas, and whitespace into PR refs (URLs or numbers).
@@ -169,8 +180,11 @@ func SamePR(a, b Snapshot) bool {
 	return a.Input != "" && a.Input == b.Input
 }
 
-// Same reports whether two snapshots refer to the same PR or Actions run.
+// Same reports whether two snapshots refer to the same PR, Actions run, or Jira issue.
 func Same(a, b Snapshot) bool {
+	if isJiraSnap(a) || isJiraSnap(b) {
+		return sameJira(a, b)
+	}
 	if a.RunID > 0 && a.RunID == b.RunID {
 		return true
 	}
@@ -188,6 +202,9 @@ func Same(a, b Snapshot) bool {
 
 // Fetch loads PR or Actions run status via gh.
 func Fetch(ctx context.Context, ref string, required bool) Snapshot {
+	if jira.IsRef(ref) || strings.HasPrefix(ref, "slack:") {
+		return snapshotFromJira(jira.Fetch(ctx, ref))
+	}
 	if IsRunRef(ref) {
 		return FetchRun(ctx, ref)
 	}
@@ -199,36 +216,22 @@ func fetchPR(ctx context.Context, ref string, required bool) Snapshot {
 	if repo := RepoFromRef(ref); repo != "" {
 		snap.Repo = repo
 	}
-
-	viewOut, err := runGH(ctx, "pr", "view", ref, "--json",
-		"number,title,url,state,isDraft,headRefName,author")
-	if err != nil {
-		snap.Err = err
+	snap = loadPRView(ctx, snap)
+	if snap.Err != nil {
 		return snap
 	}
-
-	var view prView
-	if err := json.Unmarshal(viewOut, &view); err != nil {
-		snap.Err = fmt.Errorf("decode pr view: %w", err)
-		return snap
-	}
-
-	snap.Number = view.Number
-	snap.Title = view.Title
-	snap.URL = view.URL
-	snap.State = view.State
-	snap.IsDraft = view.IsDraft
-	snap.HeadRefName = view.HeadRefName
-	snap.Author = view.Author.Login
-	if snap.Repo == "" {
-		snap.Repo = RepoFromRef(view.URL)
-	}
-
 	return loadChecks(ctx, snap, required)
 }
 
 // Refresh reloads status for an already-fetched PR or Actions run.
 func Refresh(ctx context.Context, prev Snapshot, required bool) Snapshot {
+	if prev.Kind == KindJira || jira.IsRef(prev.Input) || jira.IsRef(prev.URL) || strings.HasPrefix(prev.Input, "slack:") {
+		ref := prev.URL
+		if ref == "" {
+			ref = prev.Input
+		}
+		return snapshotFromJira(jira.Fetch(ctx, ref))
+	}
 	if prev.Kind == KindRun || prev.RunID > 0 || IsRunRef(prev.Input) {
 		if prev.RunID > 0 && prev.Repo != "" {
 			return loadRun(ctx, prev)
@@ -276,6 +279,12 @@ func loadChecks(ctx context.Context, snap Snapshot, required bool) Snapshot {
 }
 
 func runGH(ctx context.Context, args ...string) ([]byte, error) {
+	select {
+	case ghGate <- struct{}{}:
+		defer func() { <-ghGate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -291,9 +300,17 @@ func runGH(ctx context.Context, args ...string) ([]byte, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
+		if isRateLimit(msg) {
+			return nil, fmt.Errorf("github rate limit: wait until reset, or poll less often (-i); see https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api")
+		}
 		return nil, fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
 	}
 	return out, nil
+}
+
+func isRateLimit(msg string) bool {
+	low := strings.ToLower(msg)
+	return strings.Contains(low, "rate limit") || strings.Contains(low, "secondary rate")
 }
 
 // Summarize counts checks by bucket.

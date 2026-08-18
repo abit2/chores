@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSaveLoad(t *testing.T) {
@@ -34,6 +35,25 @@ func TestSaveLoad(t *testing.T) {
 	}
 	if len(out.Hidden) != 1 {
 		t.Fatalf("hidden=%v", out.Hidden)
+	}
+}
+
+func TestSaveLoadLastPoll(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CHORES_WATCH_FILE", filepath.Join(dir, "watch.json"))
+	at := time.Date(2026, 8, 17, 18, 0, 0, 0, time.UTC)
+	if err := Save(Watch{
+		URLs:     []string{"https://github.com/cli/cli/pull/1"},
+		LastPoll: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.LastPoll.Equal(at) {
+		t.Fatalf("lastPoll=%s", out.LastPoll)
 	}
 }
 

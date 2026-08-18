@@ -17,6 +17,7 @@ type palette struct {
 	skip       lipgloss.Color
 	text       lipgloss.Color
 	border     lipgloss.Color
+	selected   lipgloss.Color
 	selectedBg lipgloss.Color
 }
 
@@ -30,6 +31,7 @@ func colors() palette {
 		skip:       lipgloss.Color("#7F849C"),
 		text:       lipgloss.Color("#CDD6F4"),
 		border:     lipgloss.Color("#45475A"),
+		selected:   lipgloss.Color("#89B4FA"),
 		selectedBg: lipgloss.Color("#313244"),
 	}
 }
