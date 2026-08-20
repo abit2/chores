@@ -14,22 +14,23 @@ import (
 
 // PRRecord is a saved GitHub PR or Actions snapshot plus last refresh time.
 type PRRecord struct {
-	Kind         ghpr.Kind    `json:"kind"`
-	Input        string       `json:"input,omitempty"`
-	Number       int          `json:"number,omitempty"`
-	RunID        int64        `json:"runId,omitempty"`
-	Title        string       `json:"title,omitempty"`
-	URL          string       `json:"url,omitempty"`
-	State        string       `json:"state,omitempty"`
-	IsDraft      bool         `json:"isDraft,omitempty"`
-	HeadRefName  string       `json:"headRefName,omitempty"`
-	Author       string       `json:"author,omitempty"`
-	Repo         string       `json:"repo,omitempty"`
-	WorkflowName string       `json:"workflowName,omitempty"`
-	Event        string       `json:"event,omitempty"`
-	Checks       []ghpr.Check `json:"checks,omitempty"`
-	Error        string       `json:"error,omitempty"`
-	RefreshedAt  time.Time    `json:"refreshedAt"`
+	Kind               ghpr.Kind    `json:"kind"`
+	Input              string       `json:"input,omitempty"`
+	Number             int          `json:"number,omitempty"`
+	RunID              int64        `json:"runId,omitempty"`
+	Title              string       `json:"title,omitempty"`
+	URL                string       `json:"url,omitempty"`
+	State              string       `json:"state,omitempty"`
+	IsDraft            bool         `json:"isDraft,omitempty"`
+	HeadRefName        string       `json:"headRefName,omitempty"`
+	Author             string       `json:"author,omitempty"`
+	UnresolvedComments int          `json:"unresolvedComments,omitempty"`
+	Repo               string       `json:"repo,omitempty"`
+	WorkflowName       string       `json:"workflowName,omitempty"`
+	Event              string       `json:"event,omitempty"`
+	Checks             []ghpr.Check `json:"checks,omitempty"`
+	Error              string       `json:"error,omitempty"`
+	RefreshedAt        time.Time    `json:"refreshedAt"`
 }
 
 // PRsPath is the JSON file of last-fetched GitHub PR / Actions data.
@@ -162,21 +163,22 @@ func prKeys(s ghpr.Snapshot) []string {
 
 func recordFrom(s ghpr.Snapshot) PRRecord {
 	rec := PRRecord{
-		Kind:         s.Kind,
-		Input:        s.Input,
-		Number:       s.Number,
-		RunID:        s.RunID,
-		Title:        s.Title,
-		URL:          s.URL,
-		State:        s.State,
-		IsDraft:      s.IsDraft,
-		HeadRefName:  s.HeadRefName,
-		Author:       s.Author,
-		Repo:         s.Repo,
-		WorkflowName: s.WorkflowName,
-		Event:        s.Event,
-		Checks:       s.Checks,
-		RefreshedAt:  s.FetchedAt,
+		Kind:               s.Kind,
+		Input:              s.Input,
+		Number:             s.Number,
+		RunID:              s.RunID,
+		Title:              s.Title,
+		URL:                s.URL,
+		State:              s.State,
+		IsDraft:            s.IsDraft,
+		HeadRefName:        s.HeadRefName,
+		Author:             s.Author,
+		UnresolvedComments: s.UnresolvedComments,
+		Repo:               s.Repo,
+		WorkflowName:       s.WorkflowName,
+		Event:              s.Event,
+		Checks:             s.Checks,
+		RefreshedAt:        s.FetchedAt,
 	}
 	if rec.Kind == "" {
 		if rec.RunID > 0 {
@@ -197,21 +199,22 @@ func recordFrom(s ghpr.Snapshot) PRRecord {
 // Snapshot rebuilds a live snapshot from a saved record.
 func (r PRRecord) Snapshot() ghpr.Snapshot {
 	s := ghpr.Snapshot{
-		Kind:         r.Kind,
-		Input:        r.Input,
-		Number:       r.Number,
-		RunID:        r.RunID,
-		Title:        r.Title,
-		URL:          r.URL,
-		State:        r.State,
-		IsDraft:      r.IsDraft,
-		HeadRefName:  r.HeadRefName,
-		Author:       r.Author,
-		Repo:         r.Repo,
-		WorkflowName: r.WorkflowName,
-		Event:        r.Event,
-		Checks:       r.Checks,
-		FetchedAt:    r.RefreshedAt,
+		Kind:               r.Kind,
+		Input:              r.Input,
+		Number:             r.Number,
+		RunID:              r.RunID,
+		Title:              r.Title,
+		URL:                r.URL,
+		State:              r.State,
+		IsDraft:            r.IsDraft,
+		HeadRefName:        r.HeadRefName,
+		Author:             r.Author,
+		UnresolvedComments: r.UnresolvedComments,
+		Repo:               r.Repo,
+		WorkflowName:       r.WorkflowName,
+		Event:              r.Event,
+		Checks:             r.Checks,
+		FetchedAt:          r.RefreshedAt,
 	}
 	if r.Error != "" {
 		s.Err = errors.New(r.Error)

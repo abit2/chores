@@ -15,6 +15,7 @@ type palette struct {
 	fail       lipgloss.Color
 	pending    lipgloss.Color
 	skip       lipgloss.Color
+	merge      lipgloss.Color
 	text       lipgloss.Color
 	border     lipgloss.Color
 	selected   lipgloss.Color
@@ -29,6 +30,7 @@ func colors() palette {
 		fail:       lipgloss.Color("#F38BA8"),
 		pending:    lipgloss.Color("#F9E2AF"),
 		skip:       lipgloss.Color("#7F849C"),
+		merge:      lipgloss.Color("#CBA6F7"),
 		text:       lipgloss.Color("#CDD6F4"),
 		border:     lipgloss.Color("#45475A"),
 		selected:   lipgloss.Color("#89B4FA"),
@@ -53,6 +55,8 @@ func bucketStyle(bucket string) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(c.fail)
 	case "pending":
 		return lipgloss.NewStyle().Foreground(c.pending)
+	case "merged":
+		return lipgloss.NewStyle().Foreground(c.merge)
 	case "skipping", "cancel":
 		return lipgloss.NewStyle().Foreground(c.skip)
 	default:

@@ -38,27 +38,28 @@ const (
 
 // Snapshot is the latest CI picture for one pull request or Actions run.
 type Snapshot struct {
-	Kind          Kind
-	Input         string
-	Number        int
-	RunID         int64
-	Title         string
-	URL           string
-	State         string
-	IsDraft       bool
-	HeadRefName   string
-	Author        string
-	Repo          string
-	WorkflowName  string
-	Event         string
-	IssueKey      string
-	IssueType     string
-	Priority      string
-	Updated       string
-	LastCommenter string
-	Checks        []Check
-	Err           error
-	FetchedAt     time.Time
+	Kind               Kind
+	Input              string
+	Number             int
+	RunID              int64
+	Title              string
+	URL                string
+	State              string
+	IsDraft            bool
+	HeadRefName        string
+	Author             string
+	Repo               string
+	WorkflowName       string
+	Event              string
+	IssueKey           string
+	IssueType          string
+	Priority           string
+	Updated            string
+	LastCommenter      string
+	UnresolvedComments int
+	Checks             []Check
+	Err                error
+	FetchedAt          time.Time
 }
 
 // Summary counts checks by gh bucket.
@@ -80,6 +81,11 @@ type prView struct {
 	Author      struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	ReviewThreads struct {
+		Nodes []struct {
+			IsResolved bool `json:"isResolved"`
+		} `json:"nodes"`
+	} `json:"reviewThreads"`
 }
 
 var (
@@ -245,6 +251,10 @@ func Refresh(ctx context.Context, prev Snapshot, required bool) Snapshot {
 	next.Kind = KindPR
 	next.Err = nil
 	next.FetchedAt = time.Now()
+	next = loadPRView(ctx, next)
+	if next.Err != nil {
+		return next
+	}
 	return loadChecks(ctx, next, required)
 }
 
