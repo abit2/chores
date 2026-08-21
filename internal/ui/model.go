@@ -886,6 +886,12 @@ func keepOnError(next, prev ghpr.Snapshot) ghpr.Snapshot {
 	if next.WorkflowName == "" {
 		next.WorkflowName = prev.WorkflowName
 	}
+	if next.State == "" {
+		next.State = prev.State
+	}
+	if next.UnresolvedComments == 0 {
+		next.UnresolvedComments = prev.UnresolvedComments
+	}
 	if len(next.Checks) == 0 {
 		next.Checks = prev.Checks
 	}
@@ -1158,7 +1164,11 @@ func ExitSummary(tm tea.Model) string {
 			fmt.Fprintf(&b, "%s  %s  %s\n", label, status, snap.Title)
 		default:
 			sum := ghpr.Summarize(snap.Checks)
-			fmt.Fprintf(&b, "%s  %s  %s\n", label, sum.Outcome(), counts(sum))
+			status := sum.Outcome()
+			if snap.Kind != ghpr.KindRun {
+				status, _ = prBadge(snap, sum)
+			}
+			fmt.Fprintf(&b, "%s  %s  %s\n", label, status, counts(sum))
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")

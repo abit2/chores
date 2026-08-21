@@ -183,6 +183,34 @@ func TestNeedsPRView(t *testing.T) {
 	}
 }
 
+func TestApplyPRViewCountsUnresolved(t *testing.T) {
+	view := prView{
+		Number:      42,
+		Title:       "ship it",
+		URL:         "https://github.com/org/repo/pull/42",
+		State:       "MERGED",
+		HeadRefName: "ship",
+	}
+	view.Author.Login = "abit2"
+	view.ReviewThreads.Nodes = []struct {
+		IsResolved bool `json:"isResolved"`
+	}{
+		{IsResolved: false},
+		{IsResolved: true},
+		{IsResolved: false},
+	}
+	got := applyPRView(Snapshot{Input: view.URL}, view)
+	if got.State != "MERGED" {
+		t.Fatalf("state=%q", got.State)
+	}
+	if got.UnresolvedComments != 2 {
+		t.Fatalf("unresolved=%d", got.UnresolvedComments)
+	}
+	if got.Author != "abit2" || got.Number != 42 {
+		t.Fatalf("snap=%+v", got)
+	}
+}
+
 func TestSkipGitHubPoll(t *testing.T) {
 	pending := Snapshot{Kind: KindPR, Number: 1, URL: "https://github.com/cli/cli/pull/1", Checks: []Check{{Bucket: "pending"}}}
 	if SkipGitHubPoll(pending) {

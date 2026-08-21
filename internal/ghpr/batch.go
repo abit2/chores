@@ -33,9 +33,38 @@ func needsPRView(s Snapshot) bool {
 	return s.Number == 0 || s.URL == ""
 }
 
+const prViewQuery = `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      number
+      title
+      url
+      state
+      isDraft
+      headRefName
+      author { login }
+      reviewThreads(first:100){ nodes { isResolved } }
+    }
+  }
+}`
+
 func loadPRView(ctx context.Context, snap Snapshot) Snapshot {
 	snap.Kind = KindPR
 	snap.FetchedAt = time.Now()
+	repo, number := Identity(snap)
+	if repo == "" {
+		repo = RepoFromRef(snap.Input)
+	}
+	if number == 0 {
+		number = NumberFromRef(snap.Input)
+	}
+	if repo != "" && number > 0 {
+		return loadPRViewGraphQL(ctx, snap, repo, number)
+	}
+	return loadPRViewCLI(ctx, snap)
+}
+
+func loadPRViewCLI(ctx context.Context, snap Snapshot) Snapshot {
 	ref := snap.Input
 	if snap.URL != "" {
 		ref = snap.URL
@@ -51,7 +80,58 @@ func loadPRView(ctx context.Context, snap Snapshot) Snapshot {
 		snap.Err = fmt.Errorf("decode pr view: %w", err)
 		return snap
 	}
-	return applyPRView(snap, view)
+	snap = applyPRView(snap, view)
+	repo, number := Identity(snap)
+	if repo == "" || number == 0 {
+		return snap
+	}
+	next := loadPRViewGraphQL(ctx, snap, repo, number)
+	if next.Err != nil {
+		snap.Err = nil
+		return snap
+	}
+	return next
+}
+
+func loadPRViewGraphQL(ctx context.Context, snap Snapshot, repo string, number int) Snapshot {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || owner == "" || name == "" {
+		snap.Err = fmt.Errorf("repo %q", repo)
+		return snap
+	}
+	out, err := runGH(ctx, "api", "graphql",
+		"-f", "query="+prViewQuery,
+		"-f", "owner="+owner,
+		"-f", "name="+name,
+		"-F", fmt.Sprintf("number=%d", number),
+	)
+	if err != nil {
+		snap.Err = err
+		return snap
+	}
+	var resp struct {
+		Data struct {
+			Repository struct {
+				PullRequest *prView `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		snap.Err = fmt.Errorf("decode pr graphql: %w", err)
+		return snap
+	}
+	if resp.Data.Repository.PullRequest == nil {
+		msg := "pull request not found"
+		if len(resp.Errors) > 0 && resp.Errors[0].Message != "" {
+			msg = resp.Errors[0].Message
+		}
+		snap.Err = fmt.Errorf("github: %s", msg)
+		return snap
+	}
+	return applyPRView(snap, *resp.Data.Repository.PullRequest)
 }
 
 func applyPRView(snap Snapshot, view prView) Snapshot {
@@ -64,6 +144,7 @@ func applyPRView(snap Snapshot, view prView) Snapshot {
 	snap.IsDraft = view.IsDraft
 	snap.HeadRefName = view.HeadRefName
 	snap.Author = view.Author.Login
+	snap.UnresolvedComments = countUnresolved(view)
 	if snap.Repo == "" {
 		snap.Repo = RepoFromRef(view.URL)
 	}
@@ -71,6 +152,16 @@ func applyPRView(snap Snapshot, view prView) Snapshot {
 		snap.FetchedAt = time.Now()
 	}
 	return snap
+}
+
+func countUnresolved(view prView) int {
+	n := 0
+	for _, t := range view.ReviewThreads.Nodes {
+		if !t.IsResolved {
+			n++
+		}
+	}
+	return n
 }
 
 // SkipGitHubPoll reports whether a later interval poll can skip this GitHub item.

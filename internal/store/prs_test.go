@@ -17,17 +17,18 @@ func TestSaveLoadPRs(t *testing.T) {
 
 	at := time.Date(2026, 8, 17, 20, 0, 0, 0, time.UTC)
 	in := ghpr.Snapshot{
-		Kind:        ghpr.KindPR,
-		Input:       "https://github.com/org/repo/pull/1032",
-		Number:      1032,
-		Title:       "fix the widget",
-		URL:         "https://github.com/org/repo/pull/1032",
-		State:       "OPEN",
-		Repo:        "org/repo",
-		Author:      "abit2",
-		HeadRefName: "fix/widget",
-		Checks:      []ghpr.Check{{Name: "test", Bucket: "pass"}},
-		FetchedAt:   at,
+		Kind:               ghpr.KindPR,
+		Input:              "https://github.com/org/repo/pull/1032",
+		Number:             1032,
+		Title:              "fix the widget",
+		URL:                "https://github.com/org/repo/pull/1032",
+		State:              "OPEN",
+		Repo:               "org/repo",
+		Author:             "abit2",
+		HeadRefName:        "fix/widget",
+		UnresolvedComments: 2,
+		Checks:             []ghpr.Check{{Name: "test", Bucket: "pass"}},
+		FetchedAt:          at,
 	}
 	if err := SavePRs([]ghpr.Snapshot{in}); err != nil {
 		t.Fatal(err)
@@ -51,7 +52,7 @@ func TestSaveLoadPRs(t *testing.T) {
 	if !ok {
 		t.Fatalf("keys=%v", raw)
 	}
-	if rec.Title != "fix the widget" || rec.RefreshedAt.UTC() != at {
+	if rec.Title != "fix the widget" || rec.RefreshedAt.UTC() != at || rec.UnresolvedComments != 2 {
 		t.Fatalf("record=%+v", rec)
 	}
 
@@ -65,7 +66,7 @@ func TestSaveLoadPRs(t *testing.T) {
 		t.Fatal("lookup missed")
 	}
 	snap := got.Snapshot()
-	if snap.Number != 1032 || snap.Title != "fix the widget" || len(snap.Checks) != 1 {
+	if snap.Number != 1032 || snap.Title != "fix the widget" || len(snap.Checks) != 1 || snap.UnresolvedComments != 2 {
 		t.Fatalf("snap=%+v", snap)
 	}
 	if !snap.FetchedAt.Equal(at) {

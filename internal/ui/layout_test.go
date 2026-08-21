@@ -110,19 +110,76 @@ func smallWatchModel() model {
 	return m
 }
 
+func TestMergedPRWithUnresolvedCommentsShowsStatus(t *testing.T) {
+	m := New(Config{Interval: time.Minute}).(model)
+	m.mode = modeWatch
+	m.rows = []prRow{{
+		snap: ghpr.Snapshot{
+			Kind:               ghpr.KindPR,
+			Number:             42,
+			Title:              "ship it",
+			Repo:               "acme/repo",
+			State:              "MERGED",
+			UnresolvedComments: 3,
+			Checks:             []ghpr.Check{{Name: "ok", Bucket: "pass"}},
+		},
+	}}
+	got, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = got.(model)
+	view := m.View()
+	if !strings.Contains(view, "merged") {
+		t.Fatalf("missing merged:\n%s", view)
+	}
+	if !strings.Contains(view, iconPRMerged) {
+		t.Fatalf("missing merged icon:\n%s", view)
+	}
+	if !strings.Contains(view, "3 unresolved") {
+		t.Fatalf("missing unresolved comments:\n%s", view)
+	}
+	if !strings.Contains(view, iconPRUnresolved) {
+		t.Fatalf("missing unresolved icon:\n%s", view)
+	}
+}
+
+func TestPRBadgeMergedUnresolved(t *testing.T) {
+	sum := ghpr.Summarize([]ghpr.Check{{Bucket: "pass"}})
+	badge, bucket := prBadge(ghpr.Snapshot{State: "MERGED", UnresolvedComments: 3}, sum)
+	if badge != iconPRMerged+" merged · "+iconPRUnresolved+" 3 unresolved" {
+		t.Fatalf("badge=%q", badge)
+	}
+	if bucket != "merged" {
+		t.Fatalf("bucket=%q", bucket)
+	}
+
+	open, _ := prBadge(ghpr.Snapshot{State: "OPEN", UnresolvedComments: 2}, sum)
+	if open != "passed · "+iconPRUnresolved+" 2 unresolved" {
+		t.Fatalf("open=%q", open)
+	}
+
+	merged, bucket := prBadge(ghpr.Snapshot{State: "MERGED"}, sum)
+	if merged != iconPRMerged+" merged" || bucket != "merged" {
+		t.Fatalf("merged=%q bucket=%q", merged, bucket)
+	}
+}
+
 func TestKeepOnErrorPreservesChecks(t *testing.T) {
 	prev := ghpr.Snapshot{
-		Kind:   ghpr.KindPR,
-		Number: 7,
-		Title:  "old",
-		Checks: []ghpr.Check{{Name: "ci", Bucket: "pass"}},
-		Repo:   "org/repo",
-		URL:    "https://github.com/org/repo/pull/7",
+		Kind:               ghpr.KindPR,
+		Number:             7,
+		Title:              "old",
+		State:              "MERGED",
+		UnresolvedComments: 4,
+		Checks:             []ghpr.Check{{Name: "ci", Bucket: "pass"}},
+		Repo:               "org/repo",
+		URL:                "https://github.com/org/repo/pull/7",
 	}
 	next := ghpr.Snapshot{Kind: ghpr.KindPR, Input: prev.URL, Err: fmt.Errorf("boom")}
 	got := keepOnError(next, prev)
 	if got.Title != "old" || got.Number != 7 || len(got.Checks) != 1 {
 		t.Fatalf("%+v", got)
+	}
+	if got.State != "MERGED" || got.UnresolvedComments != 4 {
+		t.Fatalf("state=%q unresolved=%d", got.State, got.UnresolvedComments)
 	}
 	if got.Err == nil {
 		t.Fatal("expected error")

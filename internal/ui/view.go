@@ -182,6 +182,8 @@ func (m model) renderCard(i int, row prRow, width int) string {
 		border = c.fail
 	case snap.Kind == ghpr.KindJira:
 		border = bucketColor(jiraBucket(snap.State))
+	case strings.EqualFold(snap.State, "MERGED"):
+		border = c.merge
 	case sum.Finished() && sum.Fail > 0:
 		border = c.fail
 	case sum.Finished() && sum.Passed():
@@ -194,8 +196,8 @@ func (m model) renderCard(i int, row prRow, width int) string {
 	innerWidth := max(1, width-2)
 	var lines []string
 	lines = append(lines, m.cardTitle(snap, sum, row.notified, selected, innerWidth))
-	if meta := cardMeta(snap); meta != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(c.muted).Render(truncate(meta, innerWidth)))
+	if meta := cardMeta(snap, innerWidth); meta != "" {
+		lines = append(lines, meta)
 	}
 
 	muted := lipgloss.NewStyle().Foreground(c.muted)
@@ -276,24 +278,9 @@ func (m model) cardTitle(snap ghpr.Snapshot, sum ghpr.Summary, notified, selecte
 	if title == "" {
 		title = "loading…"
 	}
-	badge := sum.Outcome()
-	badgeStyle := bucketStyle(bucketFromOutcome(badge))
-	if snap.Kind == ghpr.KindJira {
-		badge = snap.State
-		if badge == "" {
-			badge = "loading"
-		}
-		badgeStyle = bucketStyle(jiraBucket(snap.State))
-	}
-	if snap.IsDraft {
-		badge = "draft · " + badge
-	}
-	if notified {
-		badge += " · pinged"
-	}
+	badgeRendered := renderStatusBadge(snap, sum, notified)
 
 	marker := "  "
-	badgeRendered := badgeStyle.Render(badge)
 	if selected {
 		marker = lipgloss.NewStyle().Bold(true).Foreground(c.selected).Render("▶ ")
 		sel := lipgloss.NewStyle().
@@ -328,48 +315,89 @@ func (m model) cardTitle(snap ghpr.Snapshot, sum ghpr.Summary, notified, selecte
 	return top + "\n" + lipgloss.NewStyle().Foreground(c.text).Render("  "+truncate(title, max(1, width-2)))
 }
 
-func cardMeta(snap ghpr.Snapshot) string {
-	var parts []string
+func cardMeta(snap ghpr.Snapshot, width int) string {
+	var parts []metaPart
 	if snap.Kind == ghpr.KindJira {
 		if snap.IssueType != "" {
-			parts = append(parts, snap.IssueType)
+			parts = append(parts, metaPart{snap.IssueType, "muted"})
 		}
 		if snap.Author != "" {
-			parts = append(parts, snap.Author)
+			parts = append(parts, metaPart{snap.Author, "muted"})
 		}
 		if rel := relativeJiraUpdated(snap.Updated); rel != "" {
-			parts = append(parts, rel)
+			parts = append(parts, metaPart{rel, "muted"})
 		}
-		return strings.Join(parts, " · ")
+		return renderMeta(parts, width)
 	}
 	if snap.Kind == ghpr.KindRun {
 		if snap.Event != "" {
-			parts = append(parts, snap.Event)
+			parts = append(parts, metaPart{snap.Event, "muted"})
 		}
 		if snap.HeadRefName != "" {
-			parts = append(parts, snap.HeadRefName)
+			parts = append(parts, metaPart{snap.HeadRefName, "muted"})
 		}
 		if snap.RunID > 0 {
-			parts = append(parts, fmt.Sprintf("run %d", snap.RunID))
+			parts = append(parts, metaPart{fmt.Sprintf("run %d", snap.RunID), "muted"})
 		}
 		if rel := relativeFetched(snap.FetchedAt); rel != "" {
-			parts = append(parts, rel)
+			parts = append(parts, metaPart{rel, "muted"})
 		}
-		return strings.Join(parts, " · ")
+		return renderMeta(parts, width)
 	}
 	if snap.Author != "" {
-		parts = append(parts, "@"+snap.Author)
+		parts = append(parts, metaPart{"@" + snap.Author, "muted"})
 	}
 	if snap.HeadRefName != "" {
-		parts = append(parts, snap.HeadRefName)
+		parts = append(parts, metaPart{snap.HeadRefName, "muted"})
 	}
 	if snap.State != "" && !strings.EqualFold(snap.State, "OPEN") {
-		parts = append(parts, strings.ToLower(snap.State))
+		bucket := "skipping"
+		text := strings.ToLower(snap.State)
+		if strings.EqualFold(snap.State, "MERGED") {
+			bucket = "merged"
+			text = iconPRMerged + " merged"
+		}
+		parts = append(parts, metaPart{text, bucket})
+	}
+	if snap.UnresolvedComments > 0 {
+		parts = append(parts, metaPart{
+			fmt.Sprintf("%s %d unresolved", iconPRUnresolved, snap.UnresolvedComments),
+			"pending",
+		})
 	}
 	if rel := relativeFetched(snap.FetchedAt); rel != "" {
-		parts = append(parts, rel)
+		parts = append(parts, metaPart{rel, "muted"})
 	}
-	return strings.Join(parts, " · ")
+	return renderMeta(parts, width)
+}
+
+type metaPart struct {
+	text   string
+	bucket string
+}
+
+func renderMeta(parts []metaPart, width int) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	plain := make([]string, len(parts))
+	for i, p := range parts {
+		plain[i] = p.text
+	}
+	joined := strings.Join(plain, " · ")
+	if width > 0 && lipgloss.Width(joined) > width {
+		return lipgloss.NewStyle().Foreground(colors().muted).Render(truncate(joined, width))
+	}
+	sep := lipgloss.NewStyle().Foreground(colors().muted).Render(" · ")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p.bucket == "muted" {
+			out = append(out, lipgloss.NewStyle().Foreground(colors().muted).Render(p.text))
+			continue
+		}
+		out = append(out, bucketStyle(p.bucket).Render(p.text))
+	}
+	return strings.Join(out, sep)
 }
 
 func relativeFetched(t time.Time) string {
@@ -429,6 +457,8 @@ func bucketColor(bucket string) lipgloss.Color {
 		return c.fail
 	case "pending":
 		return c.pending
+	case "merged":
+		return c.merge
 	default:
 		return c.border
 	}
@@ -484,6 +514,78 @@ func (m model) renderChecks(checks []ghpr.Check, width int) []string {
 		out = append(out, strings.TrimRight(line, " "))
 	}
 	return out
+}
+
+const (
+	iconPRMerged     = "⎇"
+	iconPRUnresolved = "!"
+	iconPRClosed     = "⊘"
+)
+
+type badgeSeg struct {
+	text   string
+	bucket string
+}
+
+func prBadgeSegs(snap ghpr.Snapshot, sum ghpr.Summary) []badgeSeg {
+	var segs []badgeSeg
+	switch strings.ToUpper(snap.State) {
+	case "MERGED":
+		segs = append(segs, badgeSeg{iconPRMerged + " merged", "merged"})
+	case "CLOSED":
+		segs = append(segs, badgeSeg{iconPRClosed + " closed", "skipping"})
+	default:
+		outcome := sum.Outcome()
+		segs = append(segs, badgeSeg{outcome, bucketFromOutcome(outcome)})
+	}
+	if snap.UnresolvedComments > 0 {
+		segs = append(segs, badgeSeg{
+			fmt.Sprintf("%s %d unresolved", iconPRUnresolved, snap.UnresolvedComments),
+			"pending",
+		})
+	}
+	return segs
+}
+
+func prBadge(snap ghpr.Snapshot, sum ghpr.Summary) (badge, bucket string) {
+	segs := prBadgeSegs(snap, sum)
+	if len(segs) == 0 {
+		badge = sum.Outcome()
+		return badge, bucketFromOutcome(badge)
+	}
+	texts := make([]string, len(segs))
+	for i, seg := range segs {
+		texts[i] = seg.text
+	}
+	return strings.Join(texts, " · "), segs[0].bucket
+}
+
+func renderStatusBadge(snap ghpr.Snapshot, sum ghpr.Summary, notified bool) string {
+	muted := lipgloss.NewStyle().Foreground(colors().muted)
+	sep := muted.Render(" · ")
+	var bits []string
+	if snap.IsDraft {
+		bits = append(bits, muted.Render("draft"))
+	}
+	switch snap.Kind {
+	case ghpr.KindJira:
+		badge := snap.State
+		if badge == "" {
+			badge = "loading"
+		}
+		bits = append(bits, bucketStyle(jiraBucket(snap.State)).Render(badge))
+	case ghpr.KindRun:
+		outcome := sum.Outcome()
+		bits = append(bits, bucketStyle(bucketFromOutcome(outcome)).Render(outcome))
+	default:
+		for _, seg := range prBadgeSegs(snap, sum) {
+			bits = append(bits, bucketStyle(seg.bucket).Render(seg.text))
+		}
+	}
+	if notified {
+		bits = append(bits, muted.Render("pinged"))
+	}
+	return strings.Join(bits, sep)
 }
 
 func bucketFromOutcome(outcome string) string {
